@@ -174,6 +174,22 @@ while IFS=$'\t' read -r entry_name entry_source; do
 done < <(jq -r '.plugins[] | [.name, (.source | if type == "string" then . else "object" end)] | @tsv' "$MARKETPLACE")
 [ "$seen" -eq "$expected" ] || fail C7 "checked $seen of $expected marketplace entries"
 
+# C11: README documents installation of every plugin
+marketplace_name=$(jq -r '.name' "$MARKETPLACE")
+if [ ! -f README.md ]; then
+  fail C11 "README.md not found"
+elif ! grep -Fq "/plugin marketplace add" README.md; then
+  fail C11 "README.md lacks the '/plugin marketplace add' instruction"
+else
+  for plugin in $(jq -r '.plugins[].name' "$MARKETPLACE"); do
+    if grep -Fq "/plugin install $plugin@$marketplace_name" README.md; then
+      pass "C11 [$plugin]"
+    else
+      fail "C11 [$plugin]" "README.md lacks '/plugin install $plugin@$marketplace_name'"
+    fi
+  done
+fi
+
 # C9: official validator on the marketplace and on each plugin
 if [ "${VALIDATE_SKIP_CLI:-0}" = 1 ]; then
   skip C9 "VALIDATE_SKIP_CLI=1"
