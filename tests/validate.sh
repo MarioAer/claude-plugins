@@ -138,6 +138,17 @@ for dir in plugins/*/; do
     fail "C10 [$plugin]" "no component found (expected one of: $COMPONENTS)"
   fi
 
+  # C13: README and LICENSE ship with the plugin; an install copies only the plugin directory
+  missing=""
+  for doc in README.md LICENSE; do
+    [ -f "$dir$doc" ] || missing="$missing $doc"
+  done
+  if [ -n "$missing" ]; then
+    fail "C13 [$plugin]" "missing in plugin directory:$missing"
+  else
+    pass "C13 [$plugin]"
+  fi
+
   # C12: hooks.json parses and every script it references via CLAUDE_PLUGIN_ROOT exists
   hooks_file="${dir}hooks/hooks.json"
   if [ -f "$hooks_file" ]; then
