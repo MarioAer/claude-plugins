@@ -18,3 +18,5 @@ jobs:
           persist-credentials: false
       - name: Structural tests
         run: VALIDATE_SKIP_CLI=1 bash tests/validate.sh
+      - name: Hook tests
+        run: bash tests/hooks.sh

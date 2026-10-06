@@ -51,20 +51,19 @@ Item format:
 
 ### Permissions
 
-The skill pre-approves only `Read` and `Edit` under `.backlog/` and three read-only commands (`git rev-parse --show-toplevel`, `git branch --show-current`, `date +%F`). Other writes in the same turn still prompt.
+- The skill pre-approves `Read` and `Edit` under `.backlog/` and three read-only commands (`git rev-parse --show-toplevel`, `git branch --show-current`, `date +%F`).
+- A `PreToolUse` hook (`plugins/backlog/hooks/allow-backlog-write.sh`) allows writes to exactly two files, `.backlog/backlog.md` and `.backlog/.gitignore`. The hook is needed because Claude Code does not apply a skill's `allowed-tools` reliably when Claude invokes the skill itself. The hook gives no decision for paths with `..`, paths inside `.claude/` or `.git/`, symlinks, or any other file, so those get the normal prompt.
+- Other writes in the same turn still prompt.
+- A `SessionStart` hook (`plugins/backlog/hooks/session-start.sh`) adds two sentences of context to each session, telling Claude to record out-of-scope findings with the skill instead of only mentioning them. Without it, Claude noticed such defects but did not record them. The cost is about 60 tokens per session in every project where the plugin is enabled.
 
-For captures without any prompt, also add these rules to `permissions.allow` in your settings:
-
-| Rule | Reason |
-|---|---|
-| `Skill(backlog:backlog)` | Claude invoking the skill on its own requires approval of the Skill tool. |
-| `Edit(//**/.backlog/**)` | Self-initiated adds occasionally lose the skill's grant and prompt for the write. |
+When Claude invokes the skill on its own, Claude Code asks once for approval of the Skill tool. To avoid that prompt, add `Skill(backlog:backlog)` to `permissions.allow` in your settings, or answer the prompt with "don't ask again".
 
 ## Development
 
 | Command | Purpose |
 |---|---|
-| `bash tests/validate.sh` | Structural tests: manifests, names, frontmatter, README, `claude plugin validate`. Runs in CI. |
+| `bash tests/validate.sh` | Structural tests: manifests, names, frontmatter, hooks, README, `claude plugin validate`. Runs in CI. |
+| `bash tests/hooks.sh` | Unit tests for the plugin hook scripts. Runs in CI. |
 | `tests/backlog-e2e.sh [ID ...]` | Headless behavioral scenarios against the working copy. Calls the Claude API; `MODEL` defaults to `sonnet`. |
 | `tests/backlog-scenarios.md` | All scenarios, including the ones that need an interactive session. |
 

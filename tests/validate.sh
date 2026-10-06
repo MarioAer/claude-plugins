@@ -138,6 +138,27 @@ for dir in plugins/*/; do
     fail "C10 [$plugin]" "no component found (expected one of: $COMPONENTS)"
   fi
 
+  # C12: hooks.json parses and every script it references via CLAUDE_PLUGIN_ROOT exists
+  hooks_file="${dir}hooks/hooks.json"
+  if [ -f "$hooks_file" ]; then
+    if ! jq empty "$hooks_file" 2>/dev/null; then
+      fail "C12 [$plugin]" "$hooks_file is not valid JSON"
+    else
+      # shellcheck disable=SC2016  # the literal ${CLAUDE_PLUGIN_ROOT} is matched, not expanded
+      scripts=$(jq -r '.. | .command? // empty' "$hooks_file" \
+        | grep -oE '\$\{CLAUDE_PLUGIN_ROOT\}/[^" ]+' | sed 's#^${CLAUDE_PLUGIN_ROOT}/##')
+      missing=""
+      for script in $scripts; do
+        [ -f "$dir$script" ] || missing="$missing $script"
+      done
+      if [ -n "$missing" ]; then
+        fail "C12 [$plugin]" "hook scripts not found:$missing"
+      else
+        pass "C12 [$plugin]"
+      fi
+    fi
+  fi
+
   # C8: SKILL.md frontmatter has a matching name and a non-empty description
   for skill_file in "$dir"skills/*/SKILL.md; do
     [ -f "$skill_file" ] || continue
