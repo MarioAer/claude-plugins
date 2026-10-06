@@ -159,7 +159,7 @@ S19() {
   new_repo "$WORK/s19"
   out=$(backlog "/backlog")
   check "no file created" absent .backlog
-  check "prints usage" contains "$out" "Usage: /backlog <text>"
+  check "asks for the text" contains "$out" "What should go on the backlog?"
 }
 
 S20() {

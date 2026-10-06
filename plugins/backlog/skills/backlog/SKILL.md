@@ -1,6 +1,6 @@
 ---
 name: backlog
-description: Record a deferred task in the project backlog (.backlog/backlog.md) without interrupting the current task, list open items, or review them. Use when the user types /backlog, or when you find concrete, actionable work outside the scope of the current task that would otherwise be lost - add it and continue the current task.
+description: Record a deferred task in the project backlog (.backlog/backlog.md) without interrupting the current task, list open items, or review them. Use when the user types /backlog. Also use it proactively whenever you notice a concrete defect or follow-up outside the scope of the current task (for example a bug in code you were told not to change): record it here instead of only mentioning it in your reply, then continue the current task.
 argument-hint: "[<task text> | list | review]"
 allowed-tools: Read(//**/.backlog/**), Edit(//**/.backlog/**), Bash(git rev-parse --show-toplevel), Bash(git branch --show-current), Bash(date +%F)
 ---
@@ -26,7 +26,7 @@ Trim the argument.
 |---|---|
 | Exactly `list` (any case) | List (section 7) |
 | Exactly `review` (any case) | Review (section 8) |
-| Empty or only whitespace | Ask once, with the AskUserQuestion tool: "What should go on the backlog?" Then add the answer (section 5). If you cannot ask (the tool is unavailable, the session is non-interactive, or you are a subagent), print `Usage: /backlog <text>` and stop. |
+| Empty or only whitespace | Reply with exactly `What should go on the backlog?` as plain text (no AskUserQuestion, no choices) and end your turn. Treat the user's next message as the item text and add it (section 5). |
 | Anything else | Add (section 5), with the argument as the item text, however short |
 
 An argument that only starts with `list` or `review` (for example `review the auth retry logic`) is item text, not a mode.
@@ -83,7 +83,7 @@ Review actions come only from the user's answers; never decide an answer yoursel
 
 1. If you cannot ask the user (the AskUserQuestion tool is unavailable, the session is non-interactive, or you are a subagent), print the open items as in section 7, then `Review needs an interactive session.`, and stop without writing.
 2. Read the backlog file and collect the open items.
-3. For each open item in order, show it and ask: done, skip, update, or quit. For update, also ask for a note. Hold all answers in memory; do not write during the loop. Quit ends the loop; items not yet reached count as skip.
+3. For each open item in order, ask with the AskUserQuestion tool, one item per question, with exactly the options done, skip, update and quit. For update, ask for the note as plain text, exactly `Note for "<item text>"?` (no AskUserQuestion, no suggested notes), end your turn, take the user's next message as the note, and continue with the next item. Hold all answers in memory; do not write during the loop. Quit ends the loop; items not yet reached count as skip.
 4. Show a summary table with columns `Item` and `Action`.
 5. Read the file again and apply the changes to the fresh content, matching items by their full line:
    - done: change `- [ ]` to `- [x]` on that line.
