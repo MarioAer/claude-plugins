@@ -34,7 +34,21 @@ Each plugin has its own README with usage, permissions and design notes:
 
 Load a working copy without installing: `claude --plugin-dir ./plugins/backlog`.
 
-A plugin's `version` in `plugin.json` pins installed users to that version. Bump it with every change that users should receive.
+### Releasing
+
+A plugin's `version` in `plugin.json` pins installed users to that version: they receive changes only after it is raised. For every change that users should receive:
+
+1. Raise `version` in `plugins/<plugin>/.claude-plugin/plugin.json` in the same pull request.
+2. After the squash merge, tag the merge commit and publish a release with notes generated from the merged pull requests:
+
+```
+git tag -s <plugin>-v<version> -m "<plugin> <version>" && git push origin <plugin>-v<version>
+gh release create <plugin>-v<version> --generate-notes --title "<plugin> <version>"
+```
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for supported versions and private vulnerability reporting.
 
 ## License
 
