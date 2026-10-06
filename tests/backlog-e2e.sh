@@ -19,11 +19,12 @@ new_repo() {
 }
 
 # Runs one headless turn with the plugin loaded and only the skill's own tool grants.
+# User-level settings, plugins and hooks are excluded so results do not depend on the developer's setup.
 # Extra arguments are passed to claude (for example --allowedTools).
 backlog() {
   local prompt=$1; shift
   claude -p "$prompt" --plugin-dir "$PLUGIN" --model "$MODEL" --strict-mcp-config \
-    --permission-mode default --max-turns 12 "$@" 2>&1
+    --setting-sources project,local --permission-mode default --max-turns 12 "$@" 2>&1
 }
 
 check() {
