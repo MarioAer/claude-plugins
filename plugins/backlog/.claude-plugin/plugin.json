@@ -1,0 +1,11 @@
+{
+  "name": "backlog",
+  "version": "0.1.0",
+  "description": "Capture deferred tasks mid-session into an untracked project backlog without interrupting the current task.",
+  "author": {
+    "name": "Mario Erazo"
+  },
+  "repository": "https://github.com/MarioAer/claude-plugins",
+  "license": "MIT",
+  "keywords": ["backlog", "todo", "deferred-tasks"]
+}

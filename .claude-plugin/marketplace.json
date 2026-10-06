@@ -1,0 +1,14 @@
+{
+  "name": "marioaer-plugins",
+  "description": "Claude Code plugins by MarioAer",
+  "owner": {
+    "name": "Mario Erazo"
+  },
+  "plugins": [
+    {
+      "name": "backlog",
+      "source": "./plugins/backlog",
+      "description": "Capture deferred tasks mid-session into an untracked project backlog without interrupting the current task."
+    }
+  ]
+}
