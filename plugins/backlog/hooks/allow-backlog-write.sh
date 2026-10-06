@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# PreToolUse hook: allow Edit/Write of <dir>/.backlog/backlog.md and <dir>/.backlog/.gitignore.
-# Skill allowed-tools are not applied reliably when Claude invokes the skill itself; this hook
-# gives the same narrow grant deterministically. Any other input yields no decision (normal prompt).
+# PreToolUse hook: allow Edit/Write of <root>/.backlog/backlog.md and <root>/.backlog/.gitignore,
+# where <root> is the git root of the session's cwd (or cwd outside git). Write is allowed only to
+# create a file. Skill allowed-tools are not applied reliably when Claude invokes the skill itself;
+# this hook gives the same narrow grant deterministically. Any other input yields no decision.
 set -u
 
 input=$(cat)
 
 [[ "$input" =~ \"tool_name\"[[:space:]]*:[[:space:]]*\"(Edit|Write)\" ]] || exit 0
-# Paths containing escaped characters do not match and therefore get no decision.
+tool=${BASH_REMATCH[1]}
+# Values containing escaped characters do not match and therefore get no decision.
 [[ "$input" =~ \"file_path\"[[:space:]]*:[[:space:]]*\"([^\"\\]*)\" ]] || exit 0
 path=${BASH_REMATCH[1]}
+[[ "$input" =~ \"cwd\"[[:space:]]*:[[:space:]]*\"([^\"\\]+)\" ]] || exit 0
+cwd=${BASH_REMATCH[1]}
 
 case "$path" in
   /*) ;;
@@ -23,9 +27,19 @@ case "$path" in
   *) exit 0 ;;
 esac
 
-dir=${path%/*}
-[ -L "$dir" ] && exit 0
+# The target must be exactly <root>/.backlog/<file>, compared with symlinks resolved.
+[ -d "$cwd" ] || exit 0
+root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || root=$cwd
+root=$(cd -P "$root" 2>/dev/null && pwd) || exit 0
+backlog_dir=${path%/*}
+[ -L "$backlog_dir" ] && exit 0
+parent=$(cd -P "${backlog_dir%/*}" 2>/dev/null && pwd) || exit 0
+[ "$parent" = "$root" ] || exit 0
+
 [ -L "$path" ] && exit 0
+if [ "$tool" = Write ] && [ -e "$path" ]; then
+  exit 0
+fi
 
 cat <<'JSON'
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow", "permissionDecisionReason": "backlog plugin: write to .backlog/"}}

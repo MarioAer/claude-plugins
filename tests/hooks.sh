@@ -10,10 +10,11 @@ trap 'rm -rf "$WORK"' EXIT
 passed=0
 failed=0
 
-# expect <label> <allow|none> <tool_name> <file_path>
+# expect <label> <allow|none> <tool_name> <file_path> [cwd]
+# cwd defaults to the directory that contains .backlog/.
 expect() {
-  local label=$1 want=$2 tool=$3 path=$4 input out got
-  input=$(printf '{"session_id":"t","hook_event_name":"PreToolUse","tool_name":"%s","tool_input":{"file_path":"%s","content":"x"}}' "$tool" "$path")
+  local label=$1 want=$2 tool=$3 path=$4 cwd=${5-${4%%/.backlog/*}} input out got
+  input=$(printf '{"session_id":"t","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"%s","tool_input":{"file_path":"%s","content":"x"}}' "$cwd" "$tool" "$path")
   out=$(printf '%s' "$input" | bash "$HOOK" 2>/dev/null)
   if grep -q '"permissionDecision": *"allow"' <<<"$out"; then got=allow; else got=none; fi
   if [ "$got" = "$want" ]; then
@@ -26,7 +27,7 @@ expect() {
 mkdir -p "$WORK/repo/.backlog" "$WORK/elsewhere" "$WORK/linked"
 ln -s "$WORK/elsewhere" "$WORK/linked/.backlog"
 ln -s "$WORK/elsewhere/target.md" "$WORK/repo/.backlog/backlog.md"
-mkdir -p "$WORK/plain/.backlog"
+mkdir -p "$WORK/plain/.backlog" "$WORK/fresh"
 
 expect "backlog.md in new folder"       allow Write "$WORK/fresh/.backlog/backlog.md"
 expect "gitignore in existing folder"   allow Write "$WORK/plain/.backlog/.gitignore"
@@ -42,6 +43,23 @@ expect "symlinked .backlog folder"      none  Write "$WORK/linked/.backlog/backl
 expect "symlinked backlog file"         none  Write "$WORK/repo/.backlog/backlog.md"
 expect "non-edit tool"                  none  Bash  "$WORK/plain/.backlog/backlog.md"
 expect "escaped quote in path"          none  Write "$WORK/plain/x\\\"y/.backlog/backlog.md"
+
+# Project boundary: only <git root of cwd, or cwd>/.backlog/ is allowed.
+mkdir -p "$WORK/gitrepo/src/sub" "$WORK/other" "$WORK/elsewhere2"
+git -C "$WORK/gitrepo" init -q
+ln -s "$WORK/elsewhere2" "$WORK/plain/link"
+ln -s "$WORK/gitrepo" "$WORK/repolink"
+expect "outside the project"            none  Write "$WORK/other/.backlog/backlog.md" "$WORK/plain"
+expect "git root from subdirectory"     allow Write "$WORK/gitrepo/.backlog/backlog.md" "$WORK/gitrepo/src/sub"
+expect "nested .backlog below root"     none  Write "$WORK/gitrepo/src/.backlog/backlog.md" "$WORK/gitrepo/src/sub"
+expect "symlinked parent directory"     none  Write "$WORK/plain/link/.backlog/backlog.md" "$WORK/plain"
+expect "root reached through symlink"   allow Write "$WORK/repolink/.backlog/backlog.md" "$WORK/gitrepo"
+expect "missing cwd"                    none  Write "$WORK/plain/.backlog/backlog.md" ""
+
+# Write may only create; existing files must be changed with Edit.
+mkdir -p "$WORK/full/.backlog" && printf '# Backlog\n' >"$WORK/full/.backlog/backlog.md"
+expect "Write over existing backlog"    none  Write "$WORK/full/.backlog/backlog.md"
+expect "Edit of existing backlog"       allow Edit  "$WORK/full/.backlog/backlog.md"
 
 out=$(printf 'not json' | bash "$HOOK" 2>/dev/null); rc=$?
 if [ "$rc" -eq 0 ] && [ -z "$out" ]; then

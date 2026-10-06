@@ -52,7 +52,7 @@ Item format:
 ### Permissions
 
 - The skill pre-approves `Read` and `Edit` under `.backlog/` and three read-only commands (`git rev-parse --show-toplevel`, `git branch --show-current`, `date +%F`).
-- A `PreToolUse` hook (`plugins/backlog/hooks/allow-backlog-write.sh`) allows writes to exactly two files, `.backlog/backlog.md` and `.backlog/.gitignore`. The hook is needed because Claude Code does not apply a skill's `allowed-tools` reliably when Claude invokes the skill itself. The hook gives no decision for paths with `..`, paths inside `.claude/` or `.git/`, symlinks, or any other file, so those get the normal prompt.
+- A `PreToolUse` hook (`plugins/backlog/hooks/allow-backlog-write.sh`) allows writes to exactly two files, `.backlog/backlog.md` and `.backlog/.gitignore`, and only in the project root (the git root of the session directory, symlinks resolved); `Write` only when it creates the file. The hook is needed because Claude Code does not apply a skill's `allowed-tools` reliably when Claude invokes the skill itself. The hook gives no decision for paths with `..`, paths inside `.claude/` or `.git/`, symlinks, or any other file, so those get the normal prompt.
 - Other writes in the same turn still prompt.
 - A `SessionStart` hook (`plugins/backlog/hooks/session-start.sh`) adds two sentences of context to each session, telling Claude to record out-of-scope findings with the skill instead of only mentioning them. Without it, Claude noticed such defects but did not record them. The cost is about 60 tokens per session in every project where the plugin is enabled.
 
