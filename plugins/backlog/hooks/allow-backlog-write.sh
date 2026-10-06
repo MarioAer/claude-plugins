@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # PreToolUse hook: allow Edit/Write of <root>/.backlog/backlog.md and <root>/.backlog/.gitignore,
 # where <root> is the git root of the session's cwd (or cwd outside git). Write is allowed only to
-# create a file. Skill allowed-tools are not applied reliably when Claude invokes the skill itself;
-# this hook gives the same narrow grant deterministically. Any other input yields no decision.
+# create a file. Skill allowed-tools are dropped when Claude invokes the skill itself and the Skill
+# tool finishes before the response stream ends (https://github.com/anthropics/claude-code/issues/99353);
+# this hook gives the same narrow grant deterministically. Remove it once that issue is fixed.
+# Any other input yields no decision.
 set -u
 
 input=$(cat)
