@@ -141,10 +141,11 @@ S16() {
 
 S17() {
   new_repo "$WORK/s17"
-  mkdir .backlog && printf '# Backlog\n\n- [ ] open one (2026-01-01)\n- [x] done one (2026-01-01)\n- [ ] open two (2026-01-02)\n' >.backlog/backlog.md
+  git checkout -q -b feature/x
+  mkdir .backlog && printf '# Backlog\n\n- [ ] open one (2026-01-01, branch: main)\n- [x] done one (2026-01-01)\n- [ ] open two (2026-01-02, branch: main)\n' >.backlog/backlog.md
   out=$(backlog "/backlog list")
-  check "first open item numbered" contains "$out" "1. open one"
-  check "second open item numbered" contains "$out" "2. open two"
+  check "first open item numbered with metadata" contains "$out" "1. open one (2026-01-01, branch: main)"
+  check "second open item numbered with metadata" contains "$out" "2. open two (2026-01-02, branch: main)"
   check "done item hidden" lacks "$out" "done one"
 }
 
