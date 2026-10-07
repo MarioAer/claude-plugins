@@ -29,7 +29,7 @@ Scenarios for `plugins/backlog/skills/backlog/SKILL.md`. Rows marked `e2e` run h
 | S14 | e2e | File whose last line has no trailing newline | `/backlog x` | New item on its own line; old item intact |
 | S15 | e2e | Project has its own tracked `.gitignore` | `/backlog x` | Project `.gitignore` unchanged |
 | S16 | e2e | Invoked from `src/sub/`, and from a linked worktree | `/backlog x` | `.backlog/backlog.md` at the root of that worktree; none in `src/sub/`; `git status` clean |
-| S17 | e2e | File with open and done items | `/backlog list` | Only open items, numbered from 1 |
+| S17 | e2e | File with open and done items | `/backlog list` | Only open items, numbered from 1, each with its `(date, ...)` metadata unchanged |
 | S18 | e2e | Item `dedupe me` already open | `/backlog dedupe me` | No second line; prints `Already on backlog: dedupe me` |
 | S19 | e2e | Headless session | `/backlog` | Prints `What should go on the backlog?`; no file created |
 | S20 | e2e | No backlog file | `/backlog list` | Prints `Backlog is empty.`; no `.backlog/` created |
