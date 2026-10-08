@@ -83,7 +83,7 @@ Review actions come only from the user's answers; never decide an answer yoursel
 
 1. If you cannot ask the user (the AskUserQuestion tool is unavailable, the session is non-interactive, or you are a subagent), print the open items as in section 7, then `Review needs an interactive session.`, and stop without writing.
 2. Read the backlog file and collect the open items.
-3. For each open item in order, ask with the AskUserQuestion tool, one item per question, with exactly the options done, skip, update and quit. For update, ask for the note as plain text, exactly `Note for "<item text>"?` (no AskUserQuestion, no suggested notes), end your turn, take the user's next message as the note, and continue with the next item. Hold all answers in memory; do not write during the loop. Quit ends the loop; items not yet reached count as skip.
+3. For each open item in order, ask with the AskUserQuestion tool, one item per question, with exactly the options done, skip, update and quit. For update, ask for the note as plain text, exactly `Note for "<item text>"?`, where `<item text>` is the item without the `- [ ] ` prefix and without its trailing parenthesised metadata (for `- [ ] fix login (2026-10-01, branch: main)`, ask `Note for "fix login"?`) (no AskUserQuestion, no suggested notes), end your turn, take the user's next message as the note, and continue with the next item. Hold all answers in memory; do not write during the loop. Quit ends the loop; items not yet reached count as skip.
 4. Show a summary table with columns `Item` and `Action`.
 5. Read the file again and apply the changes to the fresh content, matching items by their full line:
    - done: change `- [ ]` to `- [x]` on that line.
