@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Unit tests for plugin hook scripts. Exit 0 on success, 1 on failure.
+# Unit tests for the backlog hook scripts. Exit 0 on success, 1 on failure.
+# Usage: bash plugins/backlog/tests/run.sh   (ROOT is the plugin directory)
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-HOOK="$ROOT/plugins/backlog/hooks/allow-backlog-write.sh"
+HOOK="$ROOT/hooks/allow-backlog-write.sh"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/hooks-test.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 
@@ -68,7 +69,7 @@ else
   echo "FAIL malformed input: rc=$rc output=$out"; failed=$((failed + 1))
 fi
 
-SESSION_HOOK="$ROOT/plugins/backlog/hooks/session-start.sh"
+SESSION_HOOK="$ROOT/hooks/session-start.sh"
 out=$(printf '{"hook_event_name":"SessionStart","source":"startup"}' | bash "$SESSION_HOOK" 2>/dev/null); rc=$?
 if [ "$rc" -eq 0 ] \
   && grep -q '"hookEventName": *"SessionStart"' <<<"$out" \

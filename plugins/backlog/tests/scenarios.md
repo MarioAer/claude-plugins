@@ -1,10 +1,10 @@
 # Backlog skill: behavioral scenarios
 
-Scenarios for `plugins/backlog/skills/backlog/SKILL.md`. Rows marked `e2e` run headless in `tests/backlog-e2e.sh`; rows marked `manual` need an interactive session.
+Scenarios for `plugins/backlog/skills/backlog/SKILL.md`. Rows marked `e2e` run headless in `plugins/backlog/tests/e2e.sh`; rows marked `manual` need an interactive session.
 
 ## Running
 
-- Automated: `tests/backlog-e2e.sh` (all) or `tests/backlog-e2e.sh S1 S16` (selected). Set `MODEL` to override the default `sonnet`. The script calls the Claude API.
+- Automated: `plugins/backlog/tests/e2e.sh` (all) or `plugins/backlog/tests/e2e.sh S1 S16` (selected). Set `MODEL` to override the default `sonnet`. The script calls the Claude API.
 - Manual: in a scratch repository (`cd "$(mktemp -d)" && git init -q -b main && git commit -q --allow-empty -m init`), start `claude --plugin-dir <path-to-repo>/plugins/backlog`. If bare `/backlog` is shadowed, use `/backlog:backlog`.
 
 `<today>` means the output of `date +%F`. `<branch>` means the output of `git branch --show-current`.
