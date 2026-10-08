@@ -1,0 +1,18 @@
+{
+  "name": "skim",
+  "description": "Keeps bulk file contents out of the main model's context: a read guard that teaches outlining first, and a Haiku worker for questions that still need the whole file.",
+  "version": "0.1.1",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/MarioAer/claude-plugins/tree/main/plugins/skim",
+  "repository": "https://github.com/MarioAer/claude-plugins",
+  "author": {
+    "name": "Mario Erazo",
+    "url": "https://github.com/MarioAer"
+  },
+  "keywords": [
+    "token-optimization",
+    "context-management",
+    "model-routing",
+    "delegation"
+  ]
+}
