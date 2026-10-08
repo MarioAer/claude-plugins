@@ -36,7 +36,7 @@ Each plugin has its own README with usage, permissions and design notes:
 .claude-plugin/marketplace.json   the marketplace; every plugin is a local source under plugins/
 plugins/<name>/                   what an install copies: manifest, README, LICENSE, components
 plugins/<name>/tests/run.sh       unit suite, no API calls; run by tests/unit.sh and CI
-plugins/<name>/tests/e2e.sh       behavioral scenarios that call the Claude API; manual
+plugins/<name>/tests/e2e.sh       behavioral scenarios that call the Claude API; manual (where present)
 plugins/<name>/docs/              reference docs for that plugin (where present)
 plugins/<name>/evals/             benchmark harness for that plugin (where present)
 docs/superpowers/                 design specs and implementation plans
@@ -49,7 +49,7 @@ tests/                            repository-wide checks
 |---|---|
 | `bash tests/validate.sh` | Structural tests over the marketplace and every plugin: manifests, names, frontmatter, hooks, README, licenses, `claude plugin validate --strict`. Runs in CI. |
 | `bash tests/unit.sh` | Runs every `plugins/<name>/tests/run.sh`. Runs in CI, after ShellCheck over all shell scripts. |
-| `plugins/<name>/tests/e2e.sh` | Headless behavioral scenarios for one plugin. Calls the Claude API; not run in CI. |
+| `plugins/<name>/tests/e2e.sh` | Headless behavioral scenarios for one plugin (where present). Calls the Claude API; not run in CI. |
 
 Load a working copy without installing: `claude --plugin-dir ./plugins/<name>`.
 
