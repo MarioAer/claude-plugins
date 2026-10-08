@@ -27,10 +27,9 @@ Each plugin has its own README with usage, permissions and design notes:
 
 | Command | Purpose |
 |---|---|
-| `bash tests/validate.sh` | Structural tests: manifests, names, frontmatter, hooks, README, `claude plugin validate`. Runs in CI. |
-| `bash plugins/backlog/tests/run.sh` | Unit tests for the backlog hook scripts. Runs in CI. |
-| `plugins/backlog/tests/e2e.sh [ID ...]` | Headless behavioral scenarios against the working copy. Calls the Claude API; `MODEL` defaults to `sonnet`. |
-| `plugins/backlog/tests/scenarios.md` | All scenarios, including the ones that need an interactive session. |
+| `bash tests/validate.sh` | Structural tests over the marketplace and every plugin: manifests, names, frontmatter, hooks, README, licenses, `claude plugin validate --strict`. Runs in CI. |
+| `bash tests/unit.sh` | Runs every `plugins/<name>/tests/run.sh`. Runs in CI, after ShellCheck over all shell scripts. |
+| `plugins/<name>/tests/e2e.sh` | Headless behavioral scenarios for one plugin. Calls the Claude API; not run in CI. |
 
 Load a working copy without installing: `claude --plugin-dir ./plugins/backlog`.
 

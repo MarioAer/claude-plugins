@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Structural tests for the marketplace and every plugin under plugins/.
 # Exit 0 on success, 1 on failure, 2 if a dependency is missing.
-# Set VALIDATE_SKIP_CLI=1 to skip the 'claude plugin validate' check (C9).
+# Set VALIDATE_SKIP_CLI=1 to skip the 'claude plugin validate --strict' check (C9).
 set -u
 
 cd "$(dirname "$0")/.." || exit 2
@@ -230,7 +230,7 @@ elif ! command -v claude >/dev/null 2>&1; then
 else
   for target in . plugins/*/; do
     [ -d "$target" ] || continue
-    if output=$(claude plugin validate "$target" 2>&1); then
+    if output=$(claude plugin validate "$target" --strict 2>&1); then
       pass "C9 [$target]"
     else
       fail "C9 [$target]" "claude plugin validate failed: $output"

@@ -9,14 +9,20 @@ permissions:
   contents: read
 
 jobs:
-  structure:
+  validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: ShellCheck
+        run: |
+          command -v shellcheck >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
+          find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
       - name: Structural tests
-        run: VALIDATE_SKIP_CLI=1 bash tests/validate.sh
-      - name: Hook tests
-        run: bash plugins/backlog/tests/run.sh
+        run: bash tests/validate.sh
+      - name: Unit tests
+        run: bash tests/unit.sh
