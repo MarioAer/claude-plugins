@@ -330,7 +330,7 @@ jobs:
       - name: Unit tests
         run: bash tests/unit.sh
 ```
-The job is renamed from `structure` to `validate`. If `main` has a required status check named `structure`, update the ruleset after merge (`gh api repos/MarioAer/claude-plugins/rulesets` lists it); note this in the PR description.
+The job is renamed from `structure` to `validate`. Ruleset `protect-main` (id 24582529) requires a status check by job name, so it must require `validate` before the PR is opened; otherwise the PR waits for a `structure` check that never reports and cannot merge. Done by the owner on 2026-10-08 (Task 7 step 0 verifies it).
 
 - [ ] **Step 6: Update the README Development table**
 
@@ -430,7 +430,7 @@ shellcheck tests/validate.sh && echo SHELLCHECK_OK
 git add tests/validate.sh
 ```
 ```bash
-git commit -m "test: require tests/run.sh and a matching LICENSE in every plugin" -m "Plugins carry different licenses from now on, so the manifest and the shipped file must agree." --trailer "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "chore: require tests/run.sh and a matching LICENSE in every plugin" -m "Plugins carry different licenses from now on, so the manifest and the shipped file must agree." --trailer "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
 ---
@@ -474,7 +474,7 @@ cp "$SRC/docs/superpowers/specs/2026-09-22-skim-design.md" docs/superpowers/spec
 printf 'plugins/skim/evals/corpus/\n' > .gitignore
 find plugins/skim -type f | sort
 ```
-Expected: 17 files under `plugins/skim` (manifest, LICENSE, README, 1 agent, 2 hook files, 3 skill files, 2 tests, 5 evals, 2 docs) and no `corpus/` directory.
+Expected: 18 files under `plugins/skim` (manifest, LICENSE, README, 1 agent, 2 hook files, 3 skill files, 2 tests, 5 evals, 2 docs) and no `corpus/` directory.
 
 - [ ] **Step 3: Fix the test scripts' internal references**
 
@@ -742,6 +742,8 @@ python3 - <<'PY'
 import pathlib, re, sys
 bad = []
 for md in list(pathlib.Path("docs").rglob("*.md")) + list(pathlib.Path("plugins").rglob("*.md")):
+    if "superpowers/plans" in md.as_posix():
+        continue  # plans quote old and new link text inside code blocks
     for target in re.findall(r"\]\(([^)#\s]+)", md.read_text(encoding="utf-8")):
         if re.match(r"[a-z]+:", target):
             continue
@@ -823,7 +825,7 @@ Each plugin has its own README with usage, permissions and design notes:
 .claude-plugin/marketplace.json   the marketplace; every plugin is a local source under plugins/
 plugins/<name>/                   what an install copies: manifest, README, LICENSE, components
 plugins/<name>/tests/run.sh       unit suite, no API calls; run by tests/unit.sh and CI
-plugins/<name>/tests/e2e.sh       behavioral scenarios that call the Claude API; manual
+plugins/<name>/tests/e2e.sh       behavioral scenarios that call the Claude API; manual (where present)
 plugins/<name>/docs/              reference docs for that plugin (where present)
 plugins/<name>/evals/             benchmark harness for that plugin (where present)
 docs/superpowers/                 design specs and implementation plans
@@ -836,7 +838,7 @@ tests/                            repository-wide checks
 |---|---|
 | `bash tests/validate.sh` | Structural tests over the marketplace and every plugin: manifests, names, frontmatter, hooks, README, licenses, `claude plugin validate --strict`. Runs in CI. |
 | `bash tests/unit.sh` | Runs every `plugins/<name>/tests/run.sh`. Runs in CI, after ShellCheck over all shell scripts. |
-| `plugins/<name>/tests/e2e.sh` | Headless behavioral scenarios for one plugin. Calls the Claude API; not run in CI. |
+| `plugins/<name>/tests/e2e.sh` | Headless behavioral scenarios for one plugin (where present). Calls the Claude API; not run in CI. |
 
 Load a working copy without installing: `claude --plugin-dir ./plugins/<name>`.
 
@@ -906,14 +908,18 @@ Expected: `Validation passed`.
 
 - [ ] **Step 2: Confirm the guard fires from a session**
 
+Run outside the Claude Code sandbox: the guard keeps state under `CLAUDE_PLUGIN_DATA` (`~/.claude/plugins/data`), which the sandbox write-denies, and on that error the guard allows by design (`state-unwritable`), so a sandboxed run cannot fail the check.
+
 ```bash
 W=$(mktemp -d "$TMPDIR/skim-smoke.XXXXXX")
 for i in $(seq 1 400); do echo "export const v$i = $i; // padding"; done > "$W/big.ts"
 cd "$W" && claude -p "Use the Read tool to read big.ts in full, then tell me the value of v400." \
   --plugin-dir /Users/mario.erazo/Code/GitHub/MarioAer/claude-plugins/plugins/skim \
-  --model sonnet --max-turns 4 --permission-mode default --strict-mcp-config --setting-sources project,local
+  --model sonnet --max-turns 4 --permission-mode default --strict-mcp-config --setting-sources project,local \
+  --output-format stream-json --verbose > "$W/out.jsonl"
+jq -r 'select(.type=="user") | .message.content[]? | select(.type=="tool_result") | (.content|tostring)' "$W/out.jsonl" | grep -c 'above the 350-line'
 ```
-Expected: the reply mentions that the full read was blocked by the guard (reason text from `guard-read.sh`) or shows a bounded read or grep, and gives `400`. A reply that lists hundreds of lines means the hook did not run; check `hooks/hooks.json` was copied and stop.
+Expected: count of at least 1, meaning the first full Read received the guard's deny reason. The final answer is `400` whether or not the guard ran (the second identical Read is permitted by design), so the answer is not the criterion. A count of 0 means the hook did not run; check `hooks/hooks.json` was copied and stop.
 
 - [ ] **Step 3: Record the result in the PR description** (Task 7). No commit.
 
@@ -924,6 +930,15 @@ Expected: the reply mentions that the full read was blocked by the guard (reason
 **Files:**
 - None.
 
+`gh` fails TLS verification inside the Claude Code sandbox (`x509: OSStatus -26276`); every `gh` call in Tasks 7, 7b and 8 runs outside it.
+
+- [ ] **Step 0: Confirm the ruleset requires the renamed check**
+
+```bash
+gh api repos/MarioAer/claude-plugins/rulesets/24582529 --jq '[.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context]'
+```
+Expected: `["validate"]`. If it prints `["structure"]`, the owner updates the ruleset before the PR is opened (see Task 2 step 5).
+
 - [ ] **Step 1: Push and open the PR**
 
 ```bash
@@ -931,7 +946,7 @@ cd /Users/mario.erazo/Code/GitHub/MarioAer/claude-plugins
 git log --oneline origin/main..HEAD
 git push -u origin chore/import-skim
 ```
-Expected: five commits (Tasks 1 to 5).
+Expected: eight commits (the plan, Tasks 1 to 5, the README e2e qualifier, and the plan corrections).
 
 ```bash
 gh pr create --base main --title "chore: import the skim plugin and make the repository multi-plugin" --body "$(cat <<'EOF'
@@ -952,13 +967,13 @@ Move `skim` from `MarioAer/claude-skim` into this marketplace as `plugins/skim` 
 - `bash tests/validate.sh`: 30 passed, 0 failed
 - `bash tests/unit.sh`: both suites pass
 - ShellCheck clean; `claude plugin validate --strict` passes for `.`, `plugins/backlog`, `plugins/skim`
-- Session smoke test with `--plugin-dir plugins/skim`: guard denied the full read (see Task 6)
+- Session smoke test with `--plugin-dir plugins/skim`: <Task 6 result: deny count and final answer; write it only after the run>
 
 ## After merge
 
-1. If the ruleset requires the `structure` check, rename it to `validate`.
-2. Tag and release `skim-v0.1.1`.
-3. Archive `MarioAer/claude-skim` with the deprecation notice.
+1. Tag and release `skim-v0.1.1`.
+2. Archive `MarioAer/claude-skim` with the deprecation notice.
+3. Open the Renovate PR (`chore/renovate`) against `main`.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
@@ -973,6 +988,25 @@ gh pr checks --watch
 Expected: `validate` succeeds. If `npm install -g @anthropic-ai/claude-code` or `claude plugin validate` fails in CI, set `VALIDATE_SKIP_CLI=1` on the structural step as before and note the regression in the PR; do not drop ShellCheck or the unit step.
 
 - [ ] **Step 3: Merge** is the repository owner's action (squash). Stop here and report.
+
+---
+
+### Task 7b: Renovate pull request (after Task 7 merges)
+
+**Files:**
+- None new; branch `chore/renovate` already holds the change: `renovate.json` (regex manager for the CLI version in workflow files, `schedule:monthly`), the pinned `npm install -g @anthropic-ai/claude-code@<version>` in `validate.yml`, and the removal of `.github/dependabot.yml`.
+
+- [ ] **Step 1: Rebase onto the merged main and open the PR**
+
+```bash
+cd /Users/mario.erazo/Code/GitHub/MarioAer/claude-plugins
+git switch chore/renovate && git fetch origin && git rebase origin/main
+git log --oneline origin/main..HEAD
+git push -u origin chore/renovate
+```
+Expected: one commit. Open the PR against `main` with the same Goal / Changes / Verification structure as Task 7.
+
+- [ ] **Step 2: Owner installs the Renovate GitHub App** (Mend) on `MarioAer/claude-plugins`. Without it `renovate.json` has no effect and the CLI pin never moves. Dependabot security alerts are a repository setting and stay on.
 
 ---
 
@@ -994,7 +1028,7 @@ git tag -s skim-v0.1.1 -m "skim 0.1.1" && git push origin skim-v0.1.1
 gh release create skim-v0.1.1 --generate-notes --title "skim 0.1.1"
 gh repo edit MarioAer/claude-plugins --description "Claude Code plugin marketplace. backlog: capture deferred tasks mid-session. skim: keep bulk file contents out of the main model's context."
 ```
-Expected: version prints `0.1.1`; the release page exists.
+Expected: version prints `0.1.1`; the release page exists. `git tag -s` needs GPG, which fails inside the Claude Code sandbox; run the tag and `gh` lines outside it.
 
 - [ ] **Step 2: Write the deprecation notice in the old repository**
 
