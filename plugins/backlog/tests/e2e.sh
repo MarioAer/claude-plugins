@@ -17,7 +17,7 @@ new_repo() {
   mkdir -p "$1" && cd "$1" && git init -q -b main && "${G[@]}" commit -q --allow-empty -m init
 }
 
-# Runs one headless turn with the plugin loaded and only the skill's own tool grants.
+# Runs one headless turn with the plugin loaded and no tool grants beyond those passed as arguments.
 # User-level settings, plugins and hooks are excluded so results do not depend on the developer's setup.
 # Extra arguments are passed to claude (for example --allowedTools).
 backlog() {
@@ -39,6 +39,16 @@ lacks_line() { ! has_line "$1" "$2"; }
 absent() { [ ! -e "$1" ]; }
 only_additions() { ! diff "$1" "$2" | grep -q '^<'; }
 clean_status() { [ -z "$(git status --porcelain)" ]; }
+
+# Tool calls made in a headless turn, one name per line, from the stream-json transcript.
+tool_calls() {
+  local prompt=$1; shift
+  claude -p "$prompt" --plugin-dir "$PLUGIN" --model "$MODEL" --strict-mcp-config \
+    --setting-sources project,local --permission-mode default --max-turns 12 \
+    --output-format stream-json --verbose "$@" 2>/dev/null \
+    | jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") | .name'
+}
+no_output() { [ -z "$1" ]; }
 
 # --- Scenarios (IDs match tests/scenarios.md next to this script) ---
 
@@ -203,7 +213,29 @@ S24() {
   check "skill grant does not cover notes.txt" absent notes.txt
 }
 
-ALL=(S1 S2 S3 S4 S5 S8 S10 S11 S13 S14 S15 S16 S17 S18 S19 S20 S21 S22 S23 S24)
+S26() {
+  new_repo "$WORK/s26"
+  calls=$(tool_calls "/backlog hook path item")
+  check "typed add makes no tool call" no_output "$calls"
+  check "item written once" line_count .backlog/backlog.md "hook path item" 1
+}
+
+# With hooks disabled nothing pre-approves the fallback's calls; the grants stand in for a user approving the prompts.
+S27() {
+  new_repo "$WORK/s27"
+  backlog "/backlog fallback item" --settings '{"disableAllHooks": true}' \
+    --allowedTools "Read" "Write" "Edit" "Bash(git rev-parse --show-toplevel)" "Bash(git branch --show-current)" "Bash(date +%F)" >/dev/null
+  check "fallback adds the item with hooks disabled" has_line .backlog/backlog.md "- [ ] fallback item ($TODAY, branch: main)"
+}
+
+S28() {
+  new_repo "$WORK/s28"
+  calls=$(tool_calls "Use the backlog skill to record the item 'self initiated item'. Do nothing else.")
+  check "Claude's add makes only the Skill call" [ "$calls" = "Skill" ]
+  check "item carries by: claude" has_line .backlog/backlog.md "- [ ] self initiated item ($TODAY, branch: main, by: claude)"
+}
+
+ALL=(S1 S2 S3 S4 S5 S8 S10 S11 S13 S14 S15 S16 S17 S18 S19 S20 S21 S22 S23 S24 S26 S27 S28)
 [ $# -gt 0 ] && ALL=("$@")
 
 echo "backlog e2e: model=$MODEL, $(claude --version 2>/dev/null)"
