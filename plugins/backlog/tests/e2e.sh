@@ -220,9 +220,11 @@ S26() {
   check "item written once" line_count .backlog/backlog.md "hook path item" 1
 }
 
+# With hooks disabled nothing pre-approves the fallback's calls; the grants stand in for a user approving the prompts.
 S27() {
   new_repo "$WORK/s27"
-  backlog "/backlog fallback item" --settings '{"disableAllHooks": true}' >/dev/null
+  backlog "/backlog fallback item" --settings '{"disableAllHooks": true}' \
+    --allowedTools "Read" "Write" "Edit" "Bash(git rev-parse --show-toplevel)" "Bash(git branch --show-current)" "Bash(date +%F)" >/dev/null
   check "fallback adds the item with hooks disabled" has_line .backlog/backlog.md "- [ ] fallback item ($TODAY, branch: main)"
 }
 

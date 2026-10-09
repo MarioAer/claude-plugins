@@ -39,5 +39,5 @@ Scenarios for `plugins/backlog/skills/backlog/SKILL.md`. Rows marked `e2e` run h
 | S24 | e2e | `Skill(backlog:backlog)` approved | Prompt asks Claude to record an item with the skill, then create `notes.txt` | Item recorded; the write to `notes.txt` is not pre-approved by the skill (denied headless) |
 | S25 | manual | 3 open items | `/backlog review`; answers: done, quit | Only item 1 marked done; items 2 and 3 unchanged |
 | S26 | e2e | Git repo, hooks enabled | `/backlog hook path item` | No tool call in the transcript; item written once |
-| S27 | e2e | Hooks disabled (`disableAllHooks`) | `/backlog fallback item` | The skill's fallback adds the item |
+| S27 | e2e | Hooks disabled (`disableAllHooks`); fallback tools approved | `/backlog fallback item` | The skill's fallback adds the item |
 | S28 | e2e | Git repo, hooks enabled | Prompt asks Claude to record an item with the skill | Only the `Skill` call in the transcript; item carries `, by: claude)` |
