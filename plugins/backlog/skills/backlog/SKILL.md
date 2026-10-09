@@ -2,7 +2,6 @@
 name: backlog
 description: Record a deferred task in the project backlog (.backlog/backlog.md) without interrupting the current task, list open items, or review them. Use when the user types /backlog. Also use it proactively whenever you notice a concrete defect or follow-up outside the scope of the current task (for example a bug in code you were told not to change): record it here instead of only mentioning it in your reply, then continue the current task.
 argument-hint: "[<task text> | list | review]"
-allowed-tools: Read(//**/.backlog/**), Edit(//**/.backlog/**), Bash(git rev-parse --show-toplevel), Bash(git branch --show-current), Bash(date +%F)
 ---
 
 # Backlog
