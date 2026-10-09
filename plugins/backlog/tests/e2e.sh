@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # End-to-end scenarios for the backlog skill, run headless against the working copy.
 # Calls the Claude API (costs tokens, results are model-dependent); not part of validate.sh.
-# Usage: tests/backlog-e2e.sh [scenario-id ...]   (default: all)
+# Usage: plugins/backlog/tests/e2e.sh [scenario-id ...]   (default: all)
 # Environment: MODEL (default: sonnet)
 set -u
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
-PLUGIN="$ROOT/plugins/backlog"
+PLUGIN=$(cd "$(dirname "$0")/.." && pwd)
 MODEL=${MODEL:-sonnet}
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/backlog-e2e.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
@@ -41,7 +40,7 @@ absent() { [ ! -e "$1" ]; }
 only_additions() { ! diff "$1" "$2" | grep -q '^<'; }
 clean_status() { [ -z "$(git status --porcelain)" ]; }
 
-# --- Scenarios (IDs match tests/backlog-scenarios.md) ---
+# --- Scenarios (IDs match tests/scenarios.md next to this script) ---
 
 S1() {
   new_repo "$WORK/s1"

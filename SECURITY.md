@@ -14,6 +14,6 @@ You can expect an acknowledgement within 7 days. Confirmed issues are fixed in a
 
 ## Scope
 
-In scope are the files in this repository, in particular hooks that make permission decisions, such as `plugins/backlog/hooks/allow-backlog-write.sh`. A finding is in scope if a plugin approves an action that Claude Code would otherwise prompt for, beyond what the plugin documents.
+In scope are the files in this repository, in particular hooks that make permission decisions: `plugins/backlog/hooks/allow-backlog-write.sh` (allows writes) and `plugins/skim/hooks/guard-read.sh` (denies reads, and allows on any internal error). A finding is in scope if a plugin approves an action that Claude Code would otherwise prompt for, beyond what the plugin documents, or if the skim guard can be made to deny something its README says it never blocks.
 
 Vulnerabilities in Claude Code itself belong to Anthropic: https://www.anthropic.com/responsible-disclosure-policy.

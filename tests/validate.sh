@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Structural tests for the marketplace and every plugin under plugins/.
 # Exit 0 on success, 1 on failure, 2 if a dependency is missing.
-# Set VALIDATE_SKIP_CLI=1 to skip the 'claude plugin validate' check (C9).
+# Set VALIDATE_SKIP_CLI=1 to skip the 'claude plugin validate --strict' check (C9).
 set -u
 
 cd "$(dirname "$0")/.." || exit 2
@@ -149,6 +149,32 @@ for dir in plugins/*/; do
     pass "C13 [$plugin]"
   fi
 
+  # C14: plugin ships its unit suite; tests/unit.sh and CI run every plugins/*/tests/run.sh
+  if [ -f "${dir}tests/run.sh" ]; then
+    pass "C14 [$plugin]"
+  else
+    fail "C14 [$plugin]" "tests/run.sh not found"
+  fi
+
+  # C15: plugin.json license names the license the plugin ships
+  license=$(jq -r '.license // ""' "$manifest")
+  case "$license" in
+    MIT) license_marker="MIT License" ;;
+    Apache-2.0) license_marker="Apache License" ;;
+    *) license_marker="" ;;
+  esac
+  if [ -z "$license" ]; then
+    fail "C15 [$plugin]" "plugin.json lacks license"
+  elif [ -z "$license_marker" ]; then
+    fail "C15 [$plugin]" "license '$license' is not MIT or Apache-2.0; extend C15 if a new license is intended"
+  elif [ ! -f "${dir}LICENSE" ]; then
+    skip "C15 [$plugin]" "no LICENSE file (reported by C13)"
+  elif grep -Fq "$license_marker" "${dir}LICENSE"; then
+    pass "C15 [$plugin]"
+  else
+    fail "C15 [$plugin]" "LICENSE text does not contain '$license_marker' for license '$license'"
+  fi
+
   # C12: hooks.json parses and every script it references via CLAUDE_PLUGIN_ROOT exists
   hooks_file="${dir}hooks/hooks.json"
   if [ -f "$hooks_file" ]; then
@@ -230,7 +256,7 @@ elif ! command -v claude >/dev/null 2>&1; then
 else
   for target in . plugins/*/; do
     [ -d "$target" ] || continue
-    if output=$(claude plugin validate "$target" 2>&1); then
+    if output=$(claude plugin validate "$target" --strict 2>&1); then
       pass "C9 [$target]"
     else
       fail "C9 [$target]" "claude plugin validate failed: $output"

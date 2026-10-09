@@ -8,7 +8,14 @@
     {
       "name": "backlog",
       "source": "./plugins/backlog",
-      "description": "Capture deferred tasks mid-session into an untracked project backlog without interrupting the current task."
+      "description": "Capture deferred tasks mid-session into an untracked project backlog without interrupting the current task.",
+      "category": "productivity"
+    },
+    {
+      "name": "skim",
+      "source": "./plugins/skim",
+      "description": "Keeps bulk file contents out of the main model's context: a read guard that teaches outlining first, and a Haiku worker for what still needs the whole file.",
+      "category": "productivity"
     }
   ]
 }
