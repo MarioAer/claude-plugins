@@ -2,7 +2,7 @@
 
 Date: 2026-10-09
 Plugin: `plugins/backlog`, version 0.1.1 to 0.2.0
-Status: design approved in conversation; spec under review
+Status: implemented; amended 2026-10-09 after execution (see Amendments)
 
 ## Problem
 
@@ -18,12 +18,12 @@ defeats that purpose.
   the command and one confirmation line; an add Claude makes on its own initiative shows the
   `Skill(backlog:backlog)` line and one confirmation line.
 - `list` shows the list without tool calls.
-- No permission prompts, with or without sandbox auto-allow.
+- No permission prompts for adds and lists, with or without sandbox auto-allow.
 - Item text is untrusted data: it never reaches a shell and is never treated as an instruction.
-- Without working hooks (hooks disabled, `python3` absent) the plugin behaves as in 0.1.1.
+- Without working hooks (hooks disabled, `python3` absent) the skill's 0.1.1 steps still record the item; they may ask for permission.
 
 Out of scope: moving review's writes into the hook, changing the file format, the usefulness of the
-`branch:` metadata, Claude Code versions older than the one tested (2.1.293).
+`branch:` metadata, Claude Code versions older than 2.1.286 (tested: 2.1.286 and 2.1.293).
 
 ## Alternatives considered
 
@@ -59,8 +59,8 @@ add, so attribution follows from the event and no add is written twice.
 | `hooks/backlog-hook.sh` | New. Bash wrapper; always exits 0. |
 | `hooks/backlog_hook.py` | New. Python 3, standard library only. All add, list and review-empty logic. |
 | `hooks/hooks.json` | Adds `UserPromptExpansion` (no matcher) and `PostToolUse` (matcher `Skill`), both running `bash "${CLAUDE_PLUGIN_ROOT}/hooks/backlog-hook.sh"`. Existing entries unchanged. |
-| `skills/backlog/SKILL.md` | New first step that consumes hook markers; sections 3 to 5 and 7 remain as the fallback. |
-| `hooks/allow-backlog-write.sh` | Unchanged; still grants review edits and fallback writes. |
+| `skills/backlog/SKILL.md` | New section 0 that consumes hook markers; `allowed-tools` removed; sections 1 to 8 remain as the fallback. |
+| `hooks/allow-backlog-write.sh` | Comment updated; the only grant for review edits and fallback writes. |
 | `README.md`, root `SECURITY.md` | Updated (see Documentation). |
 
 ## Hook wrapper: `backlog-hook.sh`
@@ -108,7 +108,8 @@ Return `BACKLOG_FAILED: <reason>` and write nothing when:
 - `<root>/.backlog`, `backlog.md` or `.gitignore` is a symlink;
 - `<root>/.backlog` cannot be created or written;
 - the item text is longer than 2000 characters;
-- the lock cannot be acquired (see Lock).
+- the lock cannot be acquired (see Lock);
+- `<root>` has a path component `.git` or `.claude` (all modes).
 
 ### Lock (add only)
 
@@ -185,7 +186,7 @@ nothing.
 
 TDD: tests are written and run to fail before the implementation.
 
-`plugins/backlog/tests/run.sh` gains cases that feed hook JSON to `backlog-hook.sh` in temporary git
+`plugins/backlog/tests/add-hook.sh` (run from `plugins/backlog/tests/run.sh`) holds cases that feed hook JSON to `backlog-hook.sh` in temporary git
 repositories and non-git directories and assert on stdout and on the file:
 
 - typed add; Claude's add (`by: claude`); first add creates `.gitignore` and `backlog.md` with the header;
@@ -215,3 +216,9 @@ call; Claude's own add shows only the Skill line; with hooks disabled the fallba
 - Commit types `chore:` and `docs:` (the commit hook rejects scope-less `feat:` and `test:`).
 - `version` 0.1.1 to 0.2.0 in `plugins/backlog/.claude-plugin/plugin.json`.
 - After the squash merge: tag `backlog-v0.2.0` and publish a release, per the root README.
+
+## Amendments after execution
+
+- `allowed-tools` removed from `SKILL.md`: with it, Claude's own `Skill(backlog:backlog)` call returned only `Execute skill: backlog:backlog` without the skill body and no `PostToolUse` fired (A/B verified on Claude Code 2.1.286 and 2.1.293), so the item was lost. Consequence: flows that still use model tool calls may prompt (see README Permissions).
+- Section 0 makes the fallback mandatory when no marker is present: a model that saw no marker previously reported the item as recorded without writing it.
+- The hook refuses when the session directory is inside `.git/` or `.claude/`, matching `allow-backlog-write.sh`.
