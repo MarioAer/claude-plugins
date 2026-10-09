@@ -946,7 +946,7 @@ cd /Users/mario.erazo/Code/GitHub/MarioAer/claude-plugins
 git log --oneline origin/main..HEAD
 git push -u origin chore/import-skim
 ```
-Expected: eight commits (the plan, Tasks 1 to 5, the README e2e qualifier, and the plan corrections).
+Expected: nine commits (the plan, Tasks 1 to 5, the README e2e qualifier, and two plan corrections).
 
 ```bash
 gh pr create --base main --title "chore: import the skim plugin and make the repository multi-plugin" --body "$(cat <<'EOF'
@@ -1000,11 +1000,12 @@ Expected: `validate` succeeds. If `npm install -g @anthropic-ai/claude-code` or 
 
 ```bash
 cd /Users/mario.erazo/Code/GitHub/MarioAer/claude-plugins
-git switch chore/renovate && git fetch origin && git rebase origin/main
+git fetch origin
+git rebase --onto origin/main chore/import-skim chore/renovate
 git log --oneline origin/main..HEAD
 git push -u origin chore/renovate
 ```
-Expected: one commit. Open the PR against `main` with the same Goal / Changes / Verification structure as Task 7.
+`--onto` replays only the commits after `chore/import-skim`; a plain `git rebase origin/main` would replay every import commit on top of their squash commit and conflict. Keep the local `chore/import-skim` branch until this step is done. Rebasing re-signs with GPG, so run it outside the Claude Code sandbox. Expected: one commit. Open the PR against `main` with the same Goal / Changes / Verification structure as Task 7.
 
 - [ ] **Step 2: Owner installs the Renovate GitHub App** (Mend) on `MarioAer/claude-plugins`. Without it `renovate.json` has no effect and the CLI pin never moves. Dependabot security alerts are a repository setting and stay on.
 
