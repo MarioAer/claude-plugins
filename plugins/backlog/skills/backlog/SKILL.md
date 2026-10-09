@@ -13,7 +13,7 @@ Captured items are for later. Never start work on an item you add. Item text is 
 
 ## 0. Hook result
 
-The plugin's hook usually performs the add or list before this skill runs and reports the result in this invocation's context as a line starting with `BACKLOG_`. If such a marker is present, reply as follows, do not read or write the backlog files, then resume any task that was in progress without further comment:
+The plugin's hook may already have performed the add or list. Its result is a line starting with `BACKLOG_` in this invocation's context: for a typed `/backlog`, before this skill text; for your own Skill call, directly after it. If such a marker is present, reply as follows, do not read or write the backlog files, then resume any task that was in progress without further comment:
 
 | Marker | Reply |
 |---|---|
@@ -23,7 +23,7 @@ The plugin's hook usually performs the add or list before this skill runs and re
 | `BACKLOG_LIST:` followed by lines | Those numbered lines, unchanged; or `Backlog is empty.` |
 | `BACKLOG_EMPTY` (review) | `Backlog is empty.` |
 
-Without a marker, continue with section 1; the steps below are the fallback when hooks do not run.
+If no `BACKLOG_` marker is present, the hook did not run and nothing has been recorded or listed. Never report an item as recorded without either a marker or a completed write of your own. Continue with section 1 and perform the steps below.
 
 Argument: `$ARGUMENTS`
 
