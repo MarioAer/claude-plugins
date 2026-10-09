@@ -171,6 +171,8 @@ def handle(event):
     if not text or not isinstance(cwd, str) or not os.path.isdir(cwd):
         return None
     root = find_root(cwd)
+    if {".git", ".claude"} & set(root.split(os.sep)):
+        return "BACKLOG_FAILED: the session directory is inside .git or .claude"
     mode = text.casefold()
     try:
         if mode == "list":

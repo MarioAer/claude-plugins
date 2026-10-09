@@ -17,7 +17,7 @@ new_repo() {
   mkdir -p "$1" && cd "$1" && git init -q -b main && "${G[@]}" commit -q --allow-empty -m init
 }
 
-# Runs one headless turn with the plugin loaded and only the skill's own tool grants.
+# Runs one headless turn with the plugin loaded and no tool grants beyond those passed as arguments.
 # User-level settings, plugins and hooks are excluded so results do not depend on the developer's setup.
 # Extra arguments are passed to claude (for example --allowedTools).
 backlog() {

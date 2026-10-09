@@ -22,7 +22,7 @@ The plugin's hook may already have performed the add or list. Its result is a li
 | `BACKLOG_LIST:` followed by lines | Those numbered lines, unchanged; or `Backlog is empty.` |
 | `BACKLOG_EMPTY` (review) | `Backlog is empty.` |
 
-If no `BACKLOG_` marker is present, the hook did not run and nothing has been recorded or listed. Never report an item as recorded without either a marker or a completed write of your own. Continue with section 1 and perform the steps below.
+If no `BACKLOG_` marker is present, the hook did not handle this invocation and nothing has been recorded or listed. Never report an item as recorded without either a marker or a completed write of your own. Continue with section 1 and perform the steps below.
 
 Argument: `$ARGUMENTS`
 

@@ -179,6 +179,24 @@ new_repo "$WORK/lsym"; mkdir -p "$WORK/lsym/.backlog"; ln -s "$WORK/outside.md" 
 out=$(typed "$WORK/lsym" "list" | ctx)
 check "list refuses a symlinked backlog.md" equals "${out%%:*}" "BACKLOG_FAILED"
 
+# --- protected directories -----------------------------------------------------
+new_repo "$WORK/pr"
+out=$(typed "$WORK/pr/.git" "x" | ctx)
+check "cwd inside .git is refused" equals "${out%%:*}" "BACKLOG_FAILED"
+check "nothing written in .git" lacks_path "$WORK/pr/.git/.backlog"
+out=$(typed "$WORK/pr/.git/hooks" "x" | ctx)
+check "cwd inside .git/hooks is refused" equals "${out%%:*}" "BACKLOG_FAILED"
+check "nothing written in .git/hooks" lacks_path "$WORK/pr/.git/hooks/.backlog"
+mkdir -p "$WORK/notgit/.claude/sub"
+out=$(typed "$WORK/notgit/.claude/sub" "x" | ctx)
+check "non-git cwd under .claude is refused" equals "${out%%:*}" "BACKLOG_FAILED"
+check "nothing written under .claude" equals "$(find "$WORK/notgit" -name .backlog | wc -l | tr -d ' ')" "0"
+out=$(typed "$WORK/pr/.git" "list" | ctx)
+check "list inside .git is refused" equals "${out%%:*}" "BACKLOG_FAILED"
+new_repo "$WORK/my.claude.repo"
+out=$(typed "$WORK/my.claude.repo" "x" | ctx)
+check "repository named my.claude.repo still adds" equals "${out%%:*}" "BACKLOG_ADDED"
+
 # --- no output -----------------------------------------------------------------
 new_repo "$WORK/quiet"
 check "other skill name: no output" empty "$(event UserPromptExpansion "$WORK/quiet" other:skill '"x"' | bash "$HOOK")"
