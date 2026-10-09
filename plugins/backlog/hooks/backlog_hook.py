@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backlog hook: performs /backlog add (and, from Task 3, list and the empty-review check).
+"""Backlog hook: performs /backlog add and list, and reports an empty backlog for review.
 
 Input: Claude Code hook JSON on stdin, from UserPromptExpansion (typed /backlog) or PostToolUse
 on the Skill tool (Claude's own invocation). Output: at most one JSON object whose
@@ -143,6 +143,24 @@ def add(root, text, by_claude):
     return f"BACKLOG_ADDED: {text}\n{DATA_NOTE}"
 
 
+def list_items(root):
+    folder = os.path.join(root, ".backlog")
+    check_links(folder)
+    items = open_items(os.path.join(folder, "backlog.md"))
+    if not items:
+        return "BACKLOG_LIST: Backlog is empty."
+    numbered = "\n".join(f"{number}. {item}" for number, item in enumerate(items, 1))
+    return f"BACKLOG_LIST:\n{numbered}\n{DATA_NOTE}"
+
+
+def review_marker(root):
+    folder = os.path.join(root, ".backlog")
+    check_links(folder)
+    if open_items(os.path.join(folder, "backlog.md")):
+        return None
+    return "BACKLOG_EMPTY"
+
+
 def handle(event):
     """Return the marker text for this event, or None for no output."""
     skill, arg, by_claude = source(event)
@@ -153,7 +171,12 @@ def handle(event):
     if not text or not isinstance(cwd, str) or not os.path.isdir(cwd):
         return None
     root = find_root(cwd)
+    mode = text.casefold()
     try:
+        if mode == "list":
+            return list_items(root)
+        if mode == "review":
+            return review_marker(root)
         return add(root, text, by_claude)
     except Refused as exc:
         return f"BACKLOG_FAILED: {exc}"
