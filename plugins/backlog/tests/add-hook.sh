@@ -22,11 +22,16 @@ lacks_path() { [ ! -e "$1" ]; }
 equals() { [ "$1" = "$2" ] || { echo "  got:  $1"; echo "  want: $2"; return 1; }; }
 empty() { [ -z "$1" ] || { echo "  got: $1"; return 1; }; }
 
-# event <hook_event_name> <cwd> <skill> <args-json>  -> hook JSON on stdout
-event() {
+# event <hook_event_name> <cwd> <skill> <args-string>  -> hook JSON on stdout
+# event_json is the same with <args-json>, for arguments that are not strings.
+# One interpreter start per event keeps the suite fast; the hook adds one of its own.
+event() { ARGS_RAW=1 event_json "$@"; }
+event_json() {
   python3 - "$@" <<'PY'
-import json, sys
-name, cwd, skill, args = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
+import json, os, sys
+name, cwd, skill, args = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+if not os.environ.get("ARGS_RAW"):
+    args = json.loads(args)
 if name == "UserPromptExpansion":
     d = {"hook_event_name": name, "cwd": cwd, "command_name": skill, "command_args": args}
 else:
@@ -34,9 +39,8 @@ else:
 print(json.dumps(d))
 PY
 }
-jstr() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
-typed() { event UserPromptExpansion "$1" backlog:backlog "$(jstr "$2")" | bash "$HOOK"; }
-claude_add() { event PostToolUse "$1" backlog:backlog "$(jstr "$2")" | bash "$HOOK"; }
+typed() { event UserPromptExpansion "$1" backlog:backlog "$2" | bash "$HOOK"; }
+claude_add() { event PostToolUse "$1" backlog:backlog "$2" | bash "$HOOK"; }
 ctx() { python3 -c 'import json,sys
 d = sys.stdin.read()
 print(json.loads(d)["hookSpecificOutput"]["additionalContext"] if d.strip() else "", end="")'; }
@@ -224,9 +228,9 @@ check "repository named my.claude.repo still adds" equals "${out%%:*}" "BACKLOG_
 
 # --- no output -----------------------------------------------------------------
 new_repo "$WORK/quiet"
-check "other skill name: no output" empty "$(event UserPromptExpansion "$WORK/quiet" other:skill '"x"' | bash "$HOOK")"
-check "PreToolUse: no output" empty "$(event PreToolUse "$WORK/quiet" backlog:backlog '"x"' | bash "$HOOK")"
-check "non-string args: no output" empty "$(event PostToolUse "$WORK/quiet" backlog:backlog '{"a": 1}' | bash "$HOOK")"
+check "other skill name: no output" empty "$(event UserPromptExpansion "$WORK/quiet" other:skill x | bash "$HOOK")"
+check "PreToolUse: no output" empty "$(event PreToolUse "$WORK/quiet" backlog:backlog x | bash "$HOOK")"
+check "non-string args: no output" empty "$(event_json PostToolUse "$WORK/quiet" backlog:backlog '{"a": 1}' | bash "$HOOK")"
 check "empty args: no output" empty "$(typed "$WORK/quiet" "   ")"
 check "no backlog folder after ignored input" lacks_path "$WORK/quiet/.backlog"
 out=$(printf 'not json backlog:backlog' | bash "$HOOK"); rc=$?
@@ -234,7 +238,7 @@ check "malformed JSON: exit 0, no output" equals "$rc:$out" "0:"
 
 mkdir -p "$WORK/bin"
 for tool in cat dirname; do ln -s "$(command -v "$tool")" "$WORK/bin/$tool"; done
-input=$(event UserPromptExpansion "$WORK/quiet" backlog:backlog '"x"')
+input=$(event UserPromptExpansion "$WORK/quiet" backlog:backlog x)
 out=$(printf '%s' "$input" | PATH="$WORK/bin" "$BASH" "$HOOK"); rc=$?
 check "no python3 on PATH: exit 0, no output" equals "$rc:$out" "0:"
 check "no python3 on PATH: nothing written" lacks_path "$WORK/quiet/.backlog"
