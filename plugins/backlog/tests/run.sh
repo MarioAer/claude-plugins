@@ -81,4 +81,8 @@ else
 fi
 
 echo "$passed passed, $failed failed"
+
+# The add hook has its own fixtures; run them here so CI needs one entry point.
+echo
+bash "$ROOT/tests/add-hook.sh" || failed=$((failed + 1))
 [ "$failed" -eq 0 ]
