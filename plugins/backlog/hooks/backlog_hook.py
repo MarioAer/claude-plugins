@@ -49,8 +49,30 @@ def git(args, cwd):
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def find_root(cwd):
-    return os.path.realpath(git(["rev-parse", "--show-toplevel"], cwd) or cwd)
+def locate(cwd):
+    """Return (root, branch) from one git call; outside a repository, (cwd, None).
+
+    The branch is read from the HEAD file rather than resolved by git, so an unborn branch
+    (git init without a commit) still has a name, as with `git branch --show-current`.
+    """
+    out = git(["rev-parse", "--show-toplevel", "--git-path", "HEAD"], cwd)
+    lines = out.splitlines() if out else []
+    if len(lines) < 2:
+        return os.path.realpath(cwd), None
+    return os.path.realpath(lines[0]), head_branch(os.path.join(cwd, lines[1]))
+
+
+def head_branch(head_file):
+    """Branch name from a HEAD file, or None when detached or unreadable."""
+    try:
+        with open(head_file, encoding="utf-8") as fh:
+            ref = fh.read().strip()
+    except OSError:
+        return None
+    prefix = "ref: refs/heads/"
+    if not ref.startswith(prefix):
+        return None
+    return ref[len(prefix):] or None
 
 
 def open_items(path):
@@ -99,7 +121,7 @@ def acquire(lock):
     raise Refused("the backlog is locked by another session")
 
 
-def add(root, text, by_claude):
+def add(root, branch, text, by_claude):
     if len(text) > MAX_LEN:
         raise Refused(f"the item is longer than {MAX_LEN} characters")
     folder = os.path.join(root, ".backlog")
@@ -123,7 +145,6 @@ def add(root, text, by_claude):
             if META.sub("", item).casefold() == wanted:
                 return f"BACKLOG_DUPLICATE: {text}\n{DATA_NOTE}"
         meta = [datetime.date.today().isoformat()]
-        branch = git(["branch", "--show-current"], root)
         if branch:
             meta.append(f"branch: {branch}")
         if by_claude:
@@ -170,7 +191,7 @@ def handle(event):
     cwd = event.get("cwd")
     if not text or not isinstance(cwd, str) or not os.path.isdir(cwd):
         return None
-    root = find_root(cwd)
+    root, branch = locate(cwd)
     if {".git", ".claude"} & set(root.split(os.sep)):
         return "BACKLOG_FAILED: the session directory is inside .git or .claude"
     mode = text.casefold()
@@ -179,7 +200,7 @@ def handle(event):
             return list_items(root)
         if mode == "review":
             return review_marker(root)
-        return add(root, text, by_claude)
+        return add(root, branch, text, by_claude)
     except Refused as exc:
         return f"BACKLOG_FAILED: {exc}"
 

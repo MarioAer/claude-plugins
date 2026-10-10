@@ -88,6 +88,25 @@ check "line break becomes a space" has_line "$WORK/lit/.backlog/backlog.md" "- [
 typed "$WORK/lit" "   padded   " >/dev/null
 check "surrounding whitespace trimmed" has_line "$WORK/lit/.backlog/backlog.md" "- [ ] padded ($TODAY, branch: main)"
 
+# --- subprocess budget ----------------------------------------------------------
+# One git call per add: root and branch come from a single rev-parse.
+new_repo "$WORK/one"; mkdir -p "$WORK/one/bin"
+cat >"$WORK/one/bin/git" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$WORK/one/git.log"
+exec "$(command -v git)" "\$@"
+EOF
+chmod +x "$WORK/one/bin/git"
+PATH="$WORK/one/bin:$PATH" typed "$WORK/one" "single call" >/dev/null
+check "add runs git once" equals "$(wc -l <"$WORK/one/git.log" | tr -d ' ')" "1"
+check "single git call still records the branch" has_line "$WORK/one/.backlog/backlog.md" "- [ ] single call ($TODAY, branch: main)"
+"${G[@]}" -C "$WORK/one" commit -q --allow-empty -m init
+git -C "$WORK/one" worktree add -q -b side "$WORK/one-side" 2>/dev/null
+mkdir -p "$WORK/one-side/src"
+typed "$WORK/one-side/src" "in worktree" >/dev/null
+check "linked worktree: item at that worktree's root with its branch" has_line "$WORK/one-side/.backlog/backlog.md" "- [ ] in worktree ($TODAY, branch: side)"
+check "linked worktree: not written to the main worktree" equals "$(grep -c 'in worktree' "$WORK/one/.backlog/backlog.md")" "0"
+
 # --- duplicates ----------------------------------------------------------------
 new_repo "$WORK/dup"
 typed "$WORK/dup" "Dedupe Me" >/dev/null
