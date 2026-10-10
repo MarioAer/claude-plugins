@@ -164,22 +164,28 @@ def add(root, branch, text, by_claude):
     return f"BACKLOG_ADDED: {text}\n{DATA_NOTE}"
 
 
+def numbered(items):
+    return "\n".join(f"{number}. {item}" for number, item in enumerate(items, 1))
+
+
 def list_items(root):
     folder = os.path.join(root, ".backlog")
     check_links(folder)
     items = open_items(os.path.join(folder, "backlog.md"))
     if not items:
         return "BACKLOG_LIST: Backlog is empty."
-    numbered = "\n".join(f"{number}. {item}" for number, item in enumerate(items, 1))
-    return f"BACKLOG_LIST:\n{numbered}\n{DATA_NOTE}"
+    return f"BACKLOG_LIST:\n{numbered(items)}\n{DATA_NOTE}"
 
 
 def review_marker(root):
+    """Give the skill the file path and the open items, so review starts without a git call or a read."""
     folder = os.path.join(root, ".backlog")
     check_links(folder)
-    if open_items(os.path.join(folder, "backlog.md")):
-        return None
-    return "BACKLOG_EMPTY"
+    path = os.path.join(folder, "backlog.md")
+    items = open_items(path)
+    if not items:
+        return "BACKLOG_EMPTY"
+    return f"BACKLOG_REVIEW: {path}\n{numbered(items)}\n{DATA_NOTE}"
 
 
 def handle(event):
