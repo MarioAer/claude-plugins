@@ -8,7 +8,7 @@ Status: partly superseded by measurement. Read
 disagree with it, they win, because they record what was observed.
 Repository: https://github.com/MarioAer/claude-plugins (moved 2026-10-08 from
 MarioAer/claude-skim; paths in this document are relative to `plugins/skim/`)
-License: Apache-2.0
+License: MIT (relicensed from Apache-2.0 on 2026-10-10 to match the marketplace)
 
 > **Revision note (2026-09-29).** Sections 2, 3, 5.2, 6, 7, 10 and 11 were
 > changed after the skill was built and the hook mechanisms were spiked. The

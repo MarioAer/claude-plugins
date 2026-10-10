@@ -5,7 +5,7 @@ A Claude Code plugin marketplace (`marioaer-plugins`) hosting several plugins. E
 | Plugin | Description | License |
 |---|---|---|
 | [backlog](plugins/backlog) | Capture deferred tasks mid-session into an untracked project backlog without interrupting the current task. | MIT |
-| [skim](plugins/skim) | Keep bulk file contents out of the main model's context: a read guard that teaches outlining first, and a Haiku worker for what still needs the whole file. | Apache-2.0 |
+| [skim](plugins/skim) | Keep bulk file contents out of the main model's context: a read guard that teaches outlining first, and a Haiku worker for what still needs the whole file. | MIT |
 
 ## Installation
 
@@ -75,4 +75,4 @@ See [SECURITY.md](SECURITY.md) for supported versions and private vulnerability 
 
 ## License
 
-Repository-level files are [MIT](LICENSE). Each plugin ships its own license file: backlog is MIT, skim is Apache-2.0.
+The repository and every plugin are [MIT](LICENSE). Each plugin also ships its own copy in `plugins/<name>/LICENSE`, because an install copies only the plugin directory.

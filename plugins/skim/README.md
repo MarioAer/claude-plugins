@@ -94,4 +94,4 @@ in [`docs/mechanisms.md`](docs/mechanisms.md).
 
 ## License
 
-[Apache-2.0](LICENSE). Other plugins in the marketplace carry their own license.
+[MIT](LICENSE), like every plugin in the marketplace.
