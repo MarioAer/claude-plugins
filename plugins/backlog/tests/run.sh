@@ -80,6 +80,57 @@ else
   echo "FAIL session-start: rc=$rc output=$out"; failed=$((failed + 1))
 fi
 
+# Skill context budget: SKILL.md is injected on every invocation, including Claude's own adds,
+# so it holds only the decision logic; the fallback and review procedures live in files read on demand.
+SKILL_DIR="$ROOT/skills/backlog"
+SKILL_MAX_BYTES=4500
+DESCRIPTION_MAX_CHARS=250
+skill_bytes=$(wc -c <"$SKILL_DIR/SKILL.md" | tr -d ' ')
+if [ "$skill_bytes" -le "$SKILL_MAX_BYTES" ]; then
+  echo "PASS SKILL.md within $SKILL_MAX_BYTES bytes"; passed=$((passed + 1))
+else
+  echo "FAIL SKILL.md is $skill_bytes bytes, limit $SKILL_MAX_BYTES"; failed=$((failed + 1))
+fi
+# Claude Code substitutes ${CLAUDE_SKILL_DIR} in skill text, so the files are named by absolute path.
+for doc in fallback.md review.md; do
+  # shellcheck disable=SC2016  # the literal placeholder is what the skill must contain
+  if [ -f "$SKILL_DIR/$doc" ] && grep -Fq '${CLAUDE_SKILL_DIR}/'"$doc" "$SKILL_DIR/SKILL.md"; then
+    echo "PASS SKILL.md references existing $doc via CLAUDE_SKILL_DIR"; passed=$((passed + 1))
+  else
+    echo "FAIL $doc missing or not referenced as \${CLAUDE_SKILL_DIR}/$doc from SKILL.md"; failed=$((failed + 1))
+  fi
+done
+# The user's reply to the empty-argument question does not run the hook, so the row that handles
+# it must name the add procedure explicitly.
+# shellcheck disable=SC2016  # the literal placeholder is what the skill must contain
+if grep -F 'What should go on the backlog?' "$SKILL_DIR/SKILL.md" | grep -Fq '${CLAUDE_SKILL_DIR}/fallback.md'; then
+  echo "PASS empty-argument row names fallback.md for the follow-up add"; passed=$((passed + 1))
+else
+  echo "FAIL the empty-argument row must reference \${CLAUDE_SKILL_DIR}/fallback.md for the follow-up add"; failed=$((failed + 1))
+fi
+# Without the hook, review locates and reads the file itself, so the procedure must state the
+# reply for a missing file or no open items, as the fallback's List section does.
+for doc in fallback.md review.md; do
+  # shellcheck disable=SC2016  # the backticks are literal markdown in the procedure
+  if grep -Fq 'print `Backlog is empty.`' "$SKILL_DIR/$doc"; then
+    echo "PASS $doc states the empty-backlog reply"; passed=$((passed + 1))
+  else
+    echo "FAIL $doc must tell the model to print 'Backlog is empty.' when there are no open items"; failed=$((failed + 1))
+  fi
+done
+# shellcheck disable=SC2016  # the backticks are literal markdown in the skill
+if grep -Fq '`Backlog failed: <reason>`' "$SKILL_DIR/SKILL.md" && ! grep -Fq 'Backlog add failed' "$SKILL_DIR/SKILL.md"; then
+  echo "PASS failure reply is mode-neutral"; passed=$((passed + 1))
+else
+  echo "FAIL failure reply must be 'Backlog failed: <reason>' for add, list and review"; failed=$((failed + 1))
+fi
+description=$(sed -n 's/^description: *//p' "$SKILL_DIR/SKILL.md" | head -1)
+if [ -n "$description" ] && [ "${#description}" -le "$DESCRIPTION_MAX_CHARS" ]; then
+  echo "PASS skill description within $DESCRIPTION_MAX_CHARS characters"; passed=$((passed + 1))
+else
+  echo "FAIL skill description is ${#description} characters, limit $DESCRIPTION_MAX_CHARS"; failed=$((failed + 1))
+fi
+
 echo "$passed passed, $failed failed"
 
 # The add hook has its own fixtures; run them here so CI needs one entry point.
