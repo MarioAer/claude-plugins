@@ -108,6 +108,16 @@ if grep -F 'What should go on the backlog?' "$SKILL_DIR/SKILL.md" | grep -Fq '${
 else
   echo "FAIL the empty-argument row must reference \${CLAUDE_SKILL_DIR}/fallback.md for the follow-up add"; failed=$((failed + 1))
 fi
+# Without the hook, review locates and reads the file itself, so the procedure must state the
+# reply for a missing file or no open items, as the fallback's List section does.
+for doc in fallback.md review.md; do
+  # shellcheck disable=SC2016  # the backticks are literal markdown in the procedure
+  if grep -Fq 'print `Backlog is empty.`' "$SKILL_DIR/$doc"; then
+    echo "PASS $doc states the empty-backlog reply"; passed=$((passed + 1))
+  else
+    echo "FAIL $doc must tell the model to print 'Backlog is empty.' when there are no open items"; failed=$((failed + 1))
+  fi
+done
 # shellcheck disable=SC2016  # the backticks are literal markdown in the skill
 if grep -Fq '`Backlog failed: <reason>`' "$SKILL_DIR/SKILL.md" && ! grep -Fq 'Backlog add failed' "$SKILL_DIR/SKILL.md"; then
   echo "PASS failure reply is mode-neutral"; passed=$((passed + 1))
