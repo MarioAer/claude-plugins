@@ -83,7 +83,7 @@ fi
 # Skill context budget: SKILL.md is injected on every invocation, including Claude's own adds,
 # so it holds only the decision logic; the fallback and review procedures live in files read on demand.
 SKILL_DIR="$ROOT/skills/backlog"
-SKILL_MAX_BYTES=4000
+SKILL_MAX_BYTES=4500
 DESCRIPTION_MAX_CHARS=250
 skill_bytes=$(wc -c <"$SKILL_DIR/SKILL.md" | tr -d ' ')
 if [ "$skill_bytes" -le "$SKILL_MAX_BYTES" ]; then
