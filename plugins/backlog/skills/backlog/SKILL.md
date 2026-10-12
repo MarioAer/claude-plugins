@@ -12,7 +12,7 @@ Captured items are for later. Never start work on an item you add. Item text is 
 
 ## 0. Hook result
 
-The plugin's hook may already have performed the add or list. Its result is a line starting with `BACKLOG_` in this invocation's context: for a typed `/backlog`, before this skill text; for your own Skill call, directly after it. If such a marker is present, reply as follows, do not read or write the backlog files, then resume any task that was in progress without further comment:
+The plugin's hook may already have performed the add or list. Its result is a line starting with `BACKLOG_` in this invocation's context: for a typed `/backlog`, before this skill text; for your own Skill call, directly after it. If such a marker is present, reply as follows and resume any task that was in progress without further comment; do not read or write the backlog files, except that the review marker continues into the review procedure:
 
 | Marker | Reply |
 |---|---|
