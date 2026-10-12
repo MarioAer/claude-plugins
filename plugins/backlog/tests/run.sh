@@ -100,6 +100,14 @@ for doc in fallback.md review.md; do
     echo "FAIL $doc missing or not referenced as \${CLAUDE_SKILL_DIR}/$doc from SKILL.md"; failed=$((failed + 1))
   fi
 done
+# The user's reply to the empty-argument question does not run the hook, so the row that handles
+# it must name the add procedure explicitly.
+# shellcheck disable=SC2016  # the literal placeholder is what the skill must contain
+if grep -F 'What should go on the backlog?' "$SKILL_DIR/SKILL.md" | grep -Fq '${CLAUDE_SKILL_DIR}/fallback.md'; then
+  echo "PASS empty-argument row names fallback.md for the follow-up add"; passed=$((passed + 1))
+else
+  echo "FAIL the empty-argument row must reference \${CLAUDE_SKILL_DIR}/fallback.md for the follow-up add"; failed=$((failed + 1))
+fi
 # shellcheck disable=SC2016  # the backticks are literal markdown in the skill
 if grep -Fq '`Backlog failed: <reason>`' "$SKILL_DIR/SKILL.md" && ! grep -Fq 'Backlog add failed' "$SKILL_DIR/SKILL.md"; then
   echo "PASS failure reply is mode-neutral"; passed=$((passed + 1))

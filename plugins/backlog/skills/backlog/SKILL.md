@@ -40,7 +40,7 @@ Trim the argument. Read the named procedure file with the Read tool and follow i
 |---|---|
 | Exactly `list` (any case) | Read `${CLAUDE_SKILL_DIR}/fallback.md`, follow its List section |
 | Exactly `review` (any case) | Without a `BACKLOG_REVIEW` marker, the hook did not run: read `${CLAUDE_SKILL_DIR}/review.md` and follow it, locating the file yourself |
-| Empty or only whitespace | Reply with exactly `What should go on the backlog?` as plain text (no AskUserQuestion, no choices) and end your turn. Treat the user's next message as the item text and add it |
+| Empty or only whitespace | Reply with exactly `What should go on the backlog?` as plain text (no AskUserQuestion, no choices) and end your turn. Treat the user's next message as the item text: read `${CLAUDE_SKILL_DIR}/fallback.md` and follow its Add section with it |
 | Anything else | Read `${CLAUDE_SKILL_DIR}/fallback.md`, follow its Add section with the argument as the item text, however short |
 
 An argument that only starts with `list` or `review` (for example `review the auth retry logic`) is item text, not a mode.
