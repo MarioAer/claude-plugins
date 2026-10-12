@@ -59,4 +59,3 @@ While working on a task, you may add an item when you find concrete, actionable 
 
 - Keep the list flat: no sections, categories, personas or priorities.
 - Do not ask for approval or clarification before adding an item.
-- Use the Read tool, not `ls` or `cat`, to inspect files.
