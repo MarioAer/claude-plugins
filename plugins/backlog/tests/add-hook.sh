@@ -105,7 +105,7 @@ PATH="$WORK/one/bin:$PATH" typed "$WORK/one" "single call" >/dev/null
 check "add runs git once" equals "$(wc -l <"$WORK/one/git.log" | tr -d ' ')" "1"
 check "single git call still records the branch" has_line "$WORK/one/.backlog/backlog.md" "- [ ] single call ($TODAY, branch: main)"
 "${G[@]}" -C "$WORK/one" commit -q --allow-empty -m init
-git -C "$WORK/one" worktree add -q -b side "$WORK/one-side" 2>/dev/null
+git -C "$WORK/one" worktree add -q -b side "$WORK/one-side"
 mkdir -p "$WORK/one-side/src"
 typed "$WORK/one-side/src" "in worktree" >/dev/null
 check "linked worktree: item at that worktree's root with its branch" has_line "$WORK/one-side/.backlog/backlog.md" "- [ ] in worktree ($TODAY, branch: side)"
