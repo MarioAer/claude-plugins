@@ -243,5 +243,11 @@ out=$(printf '%s' "$input" | PATH="$WORK/bin" "$BASH" "$HOOK"); rc=$?
 check "no python3 on PATH: exit 0, no output" equals "$rc:$out" "0:"
 check "no python3 on PATH: nothing written" lacks_path "$WORK/quiet/.backlog"
 
+# --- shared store fixtures (also run by the mod's Node tests) -------------------------
+out=$(python3 "$ROOT/tests/store_fixtures.py"); rc=$?
+echo "$out"
+passed=$((passed + $(grep -c '^PASS' <<<"$out")))
+[ "$rc" -eq 0 ] || failed=$((failed + $(grep -c '^FAIL' <<<"$out")))
+
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]
