@@ -137,3 +137,39 @@ export async function add(io, { root, branch, text, byClaude }) {
     return `BACKLOG_ADDED: ${text}\n${DATA_NOTE}`
   })
 }
+
+// Applies change(lines) to the fresh file content inside the lock. change returns the new lines, or
+// null when the item is not there; nothing is written then. Never deletes a line.
+async function edit(io, root, change) {
+  const folder = `${root}/.backlog`
+  return withLock(io, folder, async () => {
+    const path = `${folder}/backlog.md`
+    const content = await io.read(path)
+    if (content === null) return false
+    const lines = change(content.split('\n'))
+    if (lines === null) return false
+    await io.write(path, lines.join('\n'))
+    return true
+  })
+}
+
+export function markDone(io, root, item) {
+  return edit(io, root, (lines) => {
+    const index = lines.indexOf(`- [ ] ${item}`)
+    if (index < 0) return null
+    lines[index] = `- [x] ${item}`
+    return lines
+  })
+}
+
+export function addNote(io, root, item, note) {
+  const text = normalize(note)
+  return edit(io, root, (lines) => {
+    const index = lines.indexOf(`- [ ] ${item}`)
+    if (index < 0) return null
+    let after = index + 1
+    while (after < lines.length && lines[after].startsWith('  - ')) after++
+    lines.splice(after, 0, `  - ${io.today()}: ${text}`)
+    return lines
+  })
+}

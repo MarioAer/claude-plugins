@@ -149,3 +149,38 @@ test('add: two parallel adds produce two intact lines', async () => {
   const lines = (await read(dir)).split('\n').filter((l) => l.startsWith('- [ ] ')).sort()
   assert.deepEqual(lines, ['- [ ] one (2026-01-01)', '- [ ] two (2026-01-01)'])
 })
+
+import { markDone, addNote } from '../../hooks/store.js'
+
+const SAMPLE = '# Backlog\n\n- [ ] alpha (2026-01-01, branch: main)\n  - 2026-01-02: earlier note\n- [ ] beta (2026-01-02)\n'
+
+async function sampleDir() {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog'))
+  await writeFile(join(dir, '.backlog/backlog.md'), SAMPLE)
+  return dir
+}
+
+test('markDone flips the box of that line only', async () => {
+  const dir = await sampleDir()
+  assert.equal(await markDone(io(), dir, 'beta (2026-01-02)'), true)
+  assert.equal(await read(dir), SAMPLE.replace('- [ ] beta', '- [x] beta'))
+})
+
+test('addNote inserts after existing sub-bullets with today\'s date', async () => {
+  const dir = await sampleDir()
+  assert.equal(await addNote(io(), dir, 'alpha (2026-01-01, branch: main)', 'blocked by\nAPI change'), true)
+  assert.equal(await read(dir), SAMPLE.replace('earlier note\n', 'earlier note\n  - 2026-01-01: blocked by API change\n'))
+})
+
+test('markDone on a vanished line writes nothing and returns false', async () => {
+  const dir = await sampleDir()
+  assert.equal(await markDone(io(), dir, 'gamma (2026-01-03)'), false)
+  assert.equal(await read(dir), SAMPLE)
+})
+
+test('edits refuse a symlinked file', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog'))
+  await writeFile(join(dir, 'outside.md'), SAMPLE)
+  await symlink(join(dir, 'outside.md'), join(dir, '.backlog/backlog.md'))
+  await assert.rejects(markDone(io(), dir, 'beta (2026-01-02)'), Refused)
+})
