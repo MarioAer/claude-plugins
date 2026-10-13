@@ -184,3 +184,57 @@ test('edits refuse a symlinked file', async () => {
   await symlink(join(dir, 'outside.md'), join(dir, '.backlog/backlog.md'))
   await assert.rejects(markDone(io(), dir, 'beta (2026-01-02)'), Refused)
 })
+
+import { splitTags, itemTags, listFilter, tagOrder, parseTagInput, PALETTE, MAX_TAGS } from '../../hooks/store.js'
+
+test('splitTags takes trailing #tags only, lowercased, deduplicated, at most eight', () => {
+  assert.deepEqual(splitTags('fix login #Auth #urgent #auth'), { text: 'fix login', tags: ['auth', 'urgent'] })
+  assert.deepEqual(splitTags('issue #12 in parser'), { text: 'issue #12 in parser', tags: [] })
+  assert.deepEqual(splitTags('fix #auth! #x'), { text: 'fix #auth!', tags: ['x'] })
+  assert.deepEqual(splitTags('fix #'), { text: 'fix #', tags: [] })
+  assert.deepEqual(splitTags('#only #tags'), { text: '', tags: ['only', 'tags'] })
+  const nine = splitTags('x ' + Array.from({ length: 9 }, (_, i) => `#t${i}`).join(' '))
+  assert.equal(nine.tags.length, MAX_TAGS)
+  assert.equal(nine.tags[0], 't0')
+  assert.deepEqual(splitTags(`x #${'a'.repeat(24)} #${'b'.repeat(25)}`), { text: `x #${'a'.repeat(24)} #${'b'.repeat(25)}`, tags: [] })
+})
+
+test('itemTags reads the tags field of a stored item', () => {
+  assert.deepEqual(itemTags('fix login (2026-10-01, branch: main, tags: auth, urgent)'), ['auth', 'urgent'])
+  assert.deepEqual(itemTags('fix login (2026-10-01, by: claude, tags: auth)'), ['auth'])
+  assert.deepEqual(itemTags('fix login (2026-10-01, branch: main)'), [])
+  assert.deepEqual(itemTags('no meta'), [])
+})
+
+test('META still strips a parenthesis with tags; stripMeta and the duplicate rule ignore tags', () => {
+  assert.equal(stripMeta('fix login (2026-10-01, branch: main, tags: auth, urgent)'), 'fix login')
+  assert.equal(stripMeta('fix login (2026-10-01, tags: auth)'), 'fix login')
+})
+
+test('listFilter and modeOf: one tag after list, any case; anything else is an add', () => {
+  assert.equal(listFilter('list #Auth'), 'auth')
+  assert.equal(listFilter('LIST #auth'), 'auth')
+  assert.equal(listFilter('list #a b'), null)
+  assert.equal(listFilter('list #'), null)
+  assert.equal(listFilter('list'), null)
+  assert.equal(modeOf('list #auth'), 'list-tag')
+  assert.equal(modeOf('list #a b'), 'add')
+  assert.equal(modeOf('list'), 'list')
+})
+
+test('tagOrder follows first appearance over open and closed lines', () => {
+  const content = '# Backlog\n\n- [x] old (2026-01-01, tags: build)\n- [ ] a (2026-01-02, tags: auth, build)\n- [ ] b (2026-01-03)\n- [ ] c (2026-01-04, tags: docs)\n'
+  assert.deepEqual(tagOrder(content), ['build', 'auth', 'docs'])
+  assert.deepEqual(tagOrder(''), [])
+})
+
+test('parseTagInput splits on spaces and commas, drops # and invalid tokens, keeps eight', () => {
+  assert.deepEqual(parseTagInput('#Auth, urgent  build'), { tags: ['auth', 'urgent', 'build'], ignored: [] })
+  assert.deepEqual(parseTagInput('auth bad! auth'), { tags: ['auth'], ignored: ['bad!'] })
+  assert.deepEqual(parseTagInput('   '), { tags: [], ignored: [] })
+  assert.equal(parseTagInput(Array.from({ length: 9 }, (_, i) => `t${i}`).join(' ')).tags.length, MAX_TAGS)
+})
+
+test('PALETTE has eight distinct colour names', () => {
+  assert.equal(new Set(PALETTE).size, 8)
+})
