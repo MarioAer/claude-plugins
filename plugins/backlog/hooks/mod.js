@@ -44,8 +44,93 @@ async function renderBand($, e, next) {
   const view = await getView($)
   const shown = view.pane !== null || view.bandUntil > Date.now()
   if (!shown || view.items.length === 0) return next(e)
-  const { Box, Text } = $.ui.resolve(e)
-  return Box({ gap: 1, children: [Text({ dimColor: true, children: `Backlog: ${view.items.length} open` })] })
+  const { Box, Text, Button } = $.ui.resolve(e)
+  return Box({ gap: 1, children: [
+    Text({ dimColor: true, children: `Backlog: ${view.items.length} open` }),
+    Button({ key: 'review', label: 'review', hotkey: 'r', plain: true, onPress: () => openPane($, view.root, view.items) }),
+  ] })
+}
+
+const PANE = 'backlog-review'
+
+async function openPane($, root, items) {
+  await setView($, (view) => ({ ...view, root, items, pane: { index: 0, noteFor: null, done: 0, skipped: 0, notes: 0 } }))
+  await $.ui.open({ id: PANE, title: 'Backlog review', focus: true, closeOnEscape: true })
+}
+
+// After an action: re-read the items, count it, move on. removed means the current line left the
+// open list (done, or vanished), so the cursor stays; otherwise it steps forward.
+async function advance($, counter, removed) {
+  const view = await getView($)
+  if (view.pane === null) return
+  let items = view.items
+  try { items = await store.list(modsIo($), view.root) } catch { /* keep what was shown */ }
+  const pane = { ...view.pane, noteFor: null, [counter]: view.pane[counter] + 1, index: view.pane.index + (removed ? 0 : 1) }
+  if (pane.index >= items.length) {
+    await setView($, (v) => ({ ...v, items, pane: null }))
+    await $.ui.close({ id: PANE })
+    $.ui.toast(`Review done: ${pane.done} done, ${pane.skipped} skipped, ${pane.notes} notes`)
+    return
+  }
+  await setView($, (v) => ({ ...v, items, pane }))
+}
+
+async function doneAction($) {
+  const view = await getView($)
+  if (view.pane === null) return
+  const item = view.items[view.pane.index]
+  try {
+    const ok = await store.markDone(modsIo($), view.root, item)
+    $.ui.toast(ok ? `Done: ${store.stripMeta(item)}` : `Backlog item changed on disk: ${store.stripMeta(item)}`)
+    await advance($, ok ? 'done' : 'skipped', true)
+  } catch (error) {
+    if (!(error instanceof store.Refused)) throw error
+    $.ui.toast(`Backlog failed: ${error.message}`)
+    await advance($, 'skipped', false)
+  }
+}
+
+async function noteAction($, value) {
+  const view = await getView($)
+  if (view.pane === null || view.pane.noteFor === null) return
+  const item = view.pane.noteFor
+  const note = store.normalize(value)
+  if (note === '') {
+    await setView($, (v) => ({ ...v, pane: { ...v.pane, noteFor: null } }))
+    return
+  }
+  try {
+    const ok = await store.addNote(modsIo($), view.root, item, note)
+    $.ui.toast(ok ? `Noted: ${store.stripMeta(item)}` : `Backlog item changed on disk: ${store.stripMeta(item)}`)
+    await advance($, ok ? 'notes' : 'skipped', !ok)
+  } catch (error) {
+    if (!(error instanceof store.Refused)) throw error
+    $.ui.toast(`Backlog failed: ${error.message}`)
+    await advance($, 'skipped', false)
+  }
+}
+
+async function renderPane($, e, next) {
+  const view = await getView($)
+  const pane = view.pane
+  if (pane === null) return next(e)
+  const { Box, Text, Button, Input } = $.ui.resolve(e)
+  const rows = view.items.map((item, index) =>
+    Text({ bold: index === pane.index, dimColor: index < pane.index, wrap: 'truncate', children: `${index + 1}. ${item}` }))
+  const controls = pane.noteFor !== null
+    ? [Input({ key: 'note', label: 'Note', placeholder: 'empty cancels', autoFocus: true, onSubmit: (value) => noteAction($, value) })]
+    : [
+        Button({ key: 'done', label: 'done', hotkey: 'd', onPress: () => doneAction($) }),
+        Button({ key: 'skip', label: 'skip', hotkey: 's', onPress: () => advance($, 'skipped', false) }),
+        Button({ key: 'note', label: 'note', hotkey: 'n', onPress: () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: v.items[v.pane.index] ?? null } })) }),
+        Button({ key: 'close', label: 'close', hotkey: 'q', onPress: () => $.ui.close({ id: PANE }) }),
+      ]
+  return Box({ flexDirection: 'column', gap: 1, children: [Box({ flexDirection: 'column', children: rows }), Box({ gap: 1, children: controls })] })
+}
+
+async function closePane($, e, next) {
+  await setView($, (view) => ({ ...view, pane: null }))
+  return next(e)
 }
 
 // The store's io interface over the mods API, declared here because the validator follows $ only
@@ -115,7 +200,14 @@ async function runCommand($, e, next) {
     capture = { cwd, until: Date.now() + CAPTURE_MS }
     return { text: 'What should go on the backlog?' }
   }
-  if (mode === 'review') return next(e)
+  if (mode === 'review') {
+    if ((await $.session.surfaces()).length === 0) return next(e)
+    const listed = await listText($, cwd)
+    if (!listed.items) return { text: listed.text }
+    if (listed.items.length === 0) return { text: 'Backlog is empty.' }
+    await openPane($, listed.root, listed.items)
+    return { text: 'Backlog review opened.' }
+  }
   if (mode === 'list') {
     const listed = await listText($, cwd)
     await showBand($, listed.root)
@@ -157,4 +249,6 @@ export const register = (on) => {
   on('tool.call', { tool: 'Skill' }, callSkill)
   on('prompt.submit', submitPrompt)
   on('ui.render', { component: 'AbovePrompt' }, renderBand)
+  on('ui.render', { component: 'Pane', requestId: 'backlog-review' }, renderPane)
+  on('ui.close', { id: 'backlog-review' }, closePane)
 }
