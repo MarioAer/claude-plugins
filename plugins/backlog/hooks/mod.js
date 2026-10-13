@@ -15,6 +15,39 @@ let capture = null
 
 export function resetCapture() { capture = null }
 
+// What the band and the pane draw from. Written only from events, never while drawing.
+const BAND_MS = 10000
+const EMPTY_VIEW = { root: null, items: [], bandUntil: 0, pane: null }
+
+async function getView($) {
+  const { value } = await $.state.get({ plugin: 'backlog', key: 'view' })
+  return value ?? EMPTY_VIEW
+}
+
+async function setView($, change) {
+  const { value, version } = await $.state.get({ plugin: 'backlog', key: 'view' })
+  const next = change(value ?? EMPTY_VIEW)
+  await $.state.set({ plugin: 'backlog', key: 'view' }, next, { ifVersion: version })
+  return next
+}
+
+// Refreshes the open items and shows the band for BAND_MS; a timer redraws once it lapses.
+async function showBand($, root) {
+  let items = []
+  try { items = await store.list(modsIo($), root) } catch { /* the refusal was already reported */ }
+  await setView($, (view) => ({ ...view, root, items, bandUntil: Date.now() + BAND_MS }))
+  $.ui.invalidate('ui.render')
+  $.clock.after(BAND_MS + 100, () => $.ui.invalidate('ui.render'))
+}
+
+async function renderBand($, e, next) {
+  const view = await getView($)
+  const shown = view.pane !== null || view.bandUntil > Date.now()
+  if (!shown || view.items.length === 0) return next(e)
+  const { Box, Text } = $.ui.resolve(e)
+  return Box({ gap: 1, children: [Text({ dimColor: true, children: `Backlog: ${view.items.length} open` })] })
+}
+
 // The store's io interface over the mods API, declared here because the validator follows $ only
 // into functions of this file. fs.read and fs.stat reject when the path is missing; the store wants
 // null there. fs.write creates parent directories, as the store relies on.
@@ -83,10 +116,15 @@ async function runCommand($, e, next) {
     return { text: 'What should go on the backlog?' }
   }
   if (mode === 'review') return next(e)
-  if (mode === 'list') return { text: (await listText($, cwd)).text }
-  const { marker } = await performAdd($, cwd, text, false)
+  if (mode === 'list') {
+    const listed = await listText($, cwd)
+    await showBand($, listed.root)
+    return { text: listed.text }
+  }
+  const { root, marker } = await performAdd($, cwd, text, false)
   const line = replyFor(marker)
   $.ui.toast(line)
+  await showBand($, root)
   return { text: line }
 }
 
@@ -94,8 +132,9 @@ async function callSkill($, e, next) {
   if (e.skill !== SKILL) return next(e)
   const text = store.normalize(e.args)
   if (store.modeOf(text) !== 'add') return next(e)
-  const { marker } = await performAdd($, await $.session.cwd(), text, true)
+  const { root, marker } = await performAdd($, await $.session.cwd(), text, true)
   $.ui.toast(replyFor(marker))
+  await showBand($, root)
   return { result: { success: true, commandName: SKILL, status: 'inline' }, context: [contextFor(marker)] }
 }
 
@@ -106,9 +145,10 @@ async function submitPrompt($, e, next) {
   if (Date.now() > pending.until || !CAPTURE_ORIGINS.has(e.origin?.kind)) return next(e)
   const text = store.normalize(e.text)
   if (text === '' || text.startsWith('/')) return next(e)
-  const { marker } = await performAdd($, pending.cwd, text, false)
+  const { root, marker } = await performAdd($, pending.cwd, text, false)
   const line = replyFor(marker)
   $.ui.toast(line)
+  await showBand($, root)
   return { drop: line }
 }
 
@@ -116,4 +156,5 @@ export const register = (on) => {
   on('command.run', { command: 'backlog:backlog' }, runCommand)
   on('tool.call', { tool: 'Skill' }, callSkill)
   on('prompt.submit', submitPrompt)
+  on('ui.render', { component: 'AbovePrompt' }, renderBand)
 }
