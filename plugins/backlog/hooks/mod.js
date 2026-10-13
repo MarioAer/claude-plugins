@@ -88,7 +88,7 @@ const PANE = 'backlog-review'
 
 async function openPane($, root) {
   const loaded = await loadView(modsIo($), root)
-  await setView($, (view) => ({ ...view, root, ...loaded, pane: { index: 0, noteFor: null, done: 0, skipped: 0, notes: 0 } }))
+  await setView($, (view) => ({ ...view, root, ...loaded, pane: { index: 0, noteFor: null, tagsFor: null, done: 0, skipped: 0, notes: 0 } }))
   await $.ui.open({ id: PANE, title: 'Backlog review', focus: true, closeOnEscape: true })
 }
 
@@ -100,7 +100,7 @@ async function advance($, counter, removed) {
   let loaded = { items: view.items, order: view.order }
   try { loaded = await loadView(modsIo($), view.root) } catch { /* keep what was shown */ }
   const items = loaded.items
-  const pane = { ...view.pane, noteFor: null, [counter]: view.pane[counter] + 1, index: view.pane.index + (removed ? 0 : 1) }
+  const pane = { ...view.pane, noteFor: null, tagsFor: null, [counter]: view.pane[counter] + 1, index: view.pane.index + (removed ? 0 : 1) }
   if (pane.index >= items.length) {
     await setView($, (v) => ({ ...v, ...loaded, pane: null }))
     await $.ui.close({ id: PANE })
@@ -145,6 +145,45 @@ async function noteAction($, value) {
   }
 }
 
+// Re-reads the list and keeps the cursor on `keep` at its new position, else clamps the old index.
+async function refreshPane($, keep) {
+  const view = await getView($)
+  if (view.pane === null) return
+  let loaded = { items: view.items, order: view.order }
+  try { loaded = await loadView(modsIo($), view.root) } catch { /* keep what was shown */ }
+  if (loaded.items.length === 0) {
+    await setView($, (v) => ({ ...v, ...loaded, pane: null }))
+    await $.ui.close({ id: PANE })
+    $.ui.toast(`Review done: ${view.pane.done} done, ${view.pane.skipped} skipped, ${view.pane.notes} notes`)
+    return
+  }
+  const found = keep === null ? -1 : loaded.items.indexOf(keep)
+  const index = found >= 0 ? found : Math.min(view.pane.index, loaded.items.length - 1)
+  await setView($, (v) => ({ ...v, ...loaded, pane: { ...v.pane, noteFor: null, tagsFor: null, index } }))
+}
+
+async function tagsAction($, value) {
+  const view = await getView($)
+  if (view.pane === null || view.pane.tagsFor === null) return
+  const item = view.pane.tagsFor
+  const { tags, ignored } = store.parseTagInput(value)
+  for (const token of ignored) $.ui.toast(`Ignored tag: ${token}`)
+  try {
+    const updated = await store.setTags(modsIo($), view.root, item, tags)
+    if (updated === null) {
+      $.ui.toast(`Backlog item changed on disk: ${store.stripMeta(item)}`)
+      await refreshPane($, null)
+      return
+    }
+    $.ui.toast(`Tagged: ${store.stripMeta(item)}`)
+    await refreshPane($, updated)
+  } catch (error) {
+    if (!(error instanceof store.Refused)) throw error
+    $.ui.toast(`Backlog failed: ${error.message}`)
+    await refreshPane($, item)
+  }
+}
+
 async function renderPane($, e, next) {
   const view = await getView($)
   const pane = view.pane
@@ -167,17 +206,26 @@ async function renderPane($, e, next) {
   }
   // Plain buttons draw as "d: done", the shape of Claude Code's own survey rows, so each key is visible.
   const noting = pane.noteFor !== null
-  const controls = noting
-    ? [Input({ key: 'note', label: 'Note', placeholder: 'empty cancels', autoFocus: true, onSubmit: (value) => noteAction($, value) })]
-    : [
-        Button({ key: 'done', label: 'done', hotkey: 'd', plain: true, onPress: () => doneAction($) }),
-        Button({ key: 'skip', label: 'skip', hotkey: 's', plain: true, onPress: () => advance($, 'skipped', false) }),
-        Button({ key: 'note', label: 'note', hotkey: 'n', plain: true, onPress: () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: v.items[v.pane.index] ?? null } })) }),
-        Button({ key: 'close', label: 'close', hotkey: 'q', plain: true, onPress: () => $.ui.close({ id: PANE }) }),
-      ]
+  const tagging = !noting && pane.tagsFor !== null
+  let controls
+  if (noting) {
+    controls = [Input({ key: 'note', label: 'Note', placeholder: 'empty cancels', autoFocus: true, onSubmit: (value) => noteAction($, value) })]
+  } else if (tagging) {
+    controls = [Input({ key: 'tags', label: 'Tags', value: store.itemTags(pane.tagsFor).join(' '), placeholder: 'space separated, empty clears', autoFocus: true, onSubmit: (value) => tagsAction($, value) })]
+  } else {
+    controls = [
+      Button({ key: 'done', label: 'done', hotkey: 'd', plain: true, onPress: () => doneAction($) }),
+      Button({ key: 'skip', label: 'skip', hotkey: 's', plain: true, onPress: () => advance($, 'skipped', false) }),
+      Button({ key: 'note', label: 'note', hotkey: 'n', plain: true, onPress: () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: v.items[v.pane.index] ?? null } })) }),
+      Button({ key: 'tags', label: 'tags', hotkey: 't', plain: true, onPress: () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, tagsFor: v.items[v.pane.index] ?? null } })) }),
+      Button({ key: 'close', label: 'close', hotkey: 'q', plain: true, onPress: () => $.ui.close({ id: PANE }) }),
+    ]
+  }
   const help = noting
     ? 'Enter saves the note, empty Enter cancels, Esc returns to the prompt.'
-    : 'Keys: d done, s skip, n note, q close. Tab moves, Enter presses, Esc returns to the prompt.'
+    : tagging
+      ? 'Enter replaces the tags, empty Enter clears them, Esc returns to the prompt.'
+      : 'Keys: d done, s skip, n note, t tags, q close. Tab moves, Enter presses, Esc returns to the prompt.'
   return Box({ flexDirection: 'column', gap: 1, children: [
     Box({ flexDirection: 'column', children: rows }),
     Box({ gap: 2, children: controls }),
