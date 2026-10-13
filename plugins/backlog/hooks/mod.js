@@ -195,12 +195,12 @@ async function performAdd($, cwd, text, byClaude) {
   }
 }
 
-async function listText($, cwd) {
+async function listText($, cwd, tag = null) {
   const io = modsIo($)
   const { root } = await store.locate(io, cwd)
   if (store.rootRefused(root)) return { root, text: replyFor(INSIDE) }
   try {
-    const items = await store.list(io, root)
+    const items = await store.list(io, root, tag)
     return { root, items, text: items.length ? store.numbered(items) : 'Backlog is empty.' }
   } catch (error) {
     if (error instanceof store.Refused) return { root, text: `Backlog failed: ${error.message}` }
@@ -224,8 +224,8 @@ async function runCommand($, e, next) {
     await openPane($, listed.root, listed.items)
     return { text: 'Backlog review opened.' }
   }
-  if (mode === 'list') {
-    const listed = await listText($, cwd)
+  if (mode === 'list' || mode === 'list-tag') {
+    const listed = await listText($, cwd, mode === 'list-tag' ? store.listFilter(text) : null)
     await showBand($, listed.root)
     return { text: listed.text }
   }

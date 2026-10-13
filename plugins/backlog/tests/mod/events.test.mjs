@@ -152,3 +152,28 @@ test("a deny rule still blocks Claude's add: the mod passes a denied call throug
   await assert.rejects(read(dir))
   assert.deepEqual($.log.toasts, [])
 })
+
+test('typed tagged add stores the tags and confirms the text without them', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  const { out } = await fire($, 'command.run', command('fix login #Auth #urgent'))
+  assert.equal(out.text, 'Added to backlog: fix login')
+  assert.match(await read(dir), new RegExp(`- \\[ \\] fix login \\(${TODAY}, branch: main, tags: auth, urgent\\)\\n$`))
+  assert.equal((await fire($, 'command.run', command('#only'))).out.text, 'Backlog failed: the item has no text')
+})
+
+test('typed list #tag filters; an unknown tag is empty; list #a b is an add', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('one #auth')); await fire($, 'command.run', command('two #build'))
+  assert.equal((await fire($, 'command.run', command('list #AUTH'))).out.text, `1. one (${TODAY}, branch: main, tags: auth)`)
+  assert.equal((await fire($, 'command.run', command('list #docs'))).out.text, 'Backlog is empty.')
+  await fire($, 'command.run', command('list #a b'))
+  assert.match(await read(dir), /- \[ \] list #a b \(/)
+})
+
+test("Claude's tagged add puts tags after by: claude; list #tag from the Skill tool passes through", async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  const { out } = await fire($, 'tool.call', skillCall('backlog:backlog', 'check retry #flaky'))
+  assert.ok(out.context[0].startsWith('BACKLOG_ADDED: check retry\n'))
+  assert.match(await read(dir), new RegExp(`- \\[ \\] check retry \\(${TODAY}, branch: main, by: claude, tags: flaky\\)\\n$`))
+  assert.equal((await fire($, 'tool.call', skillCall('backlog:backlog', 'list #flaky'))).passed, true)
+})
