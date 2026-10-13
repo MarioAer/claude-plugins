@@ -24,7 +24,7 @@ export function recorder() {
   return { on, fire }
 }
 
-export function fakeDollar({ cwd, surfaces = ['terminal'], today } = {}) {
+export function fakeDollar({ cwd, surfaces = ['terminal'], today, toolCheck = { decision: 'allow' } } = {}) {
   const base = nodeIo({ today })
   const state = new Map()
   const log = { toasts: [], opened: [], closed: [], invalidations: 0, timers: [] }
@@ -39,6 +39,7 @@ export function fakeDollar({ cwd, surfaces = ['terminal'], today } = {}) {
       stat: async (path) => { const info = await base.stat(path); if (!info) throw new Error('ENOENT'); return info },
     },
     process: { run: base.run },
+    tool: { check: async () => toolCheck },
     clock: {
       sleep: base.sleep,
       now: async () => Date.now(),

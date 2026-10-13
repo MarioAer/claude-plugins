@@ -10,7 +10,7 @@ const INSIDE = 'BACKLOG_FAILED: the session directory is inside .git or .claude'
 
 // A bare /backlog remembers the session's cwd; the next prompt typed by the person is the item.
 const CAPTURE_MS = 10 * 60 * 1000
-const CAPTURE_ORIGINS = new Set(['composer', 'sdk'])
+const CAPTURE_ORIGINS = new Set(['composer', 'sdk', 'bridge'])
 let capture = null
 
 export function resetCapture() { capture = null }
@@ -35,7 +35,14 @@ async function setView($, change) {
 async function showBand($, root) {
   let items = []
   try { items = await store.list(modsIo($), root) } catch { /* the refusal was already reported */ }
-  await setView($, (view) => ({ ...view, root, items, bandUntil: Date.now() + BAND_MS }))
+  // An open pane keeps its cursor, clamped to the fresh list; an emptied list ends the review.
+  const before = await getView($)
+  const pane = before.pane && items.length > 0 ? { ...before.pane, index: Math.min(before.pane.index, items.length - 1) } : null
+  await setView($, (current) => ({ ...current, root, items, bandUntil: Date.now() + BAND_MS, pane }))
+  if (before.pane !== null && pane === null) {
+    await $.ui.close({ id: PANE })
+    $.ui.toast(`Review done: ${before.pane.done} done, ${before.pane.skipped} skipped, ${before.pane.notes} notes`)
+  }
   $.ui.invalidate('ui.render')
   $.clock.after(BAND_MS + 100, () => $.ui.invalidate('ui.render'))
 }
@@ -224,6 +231,9 @@ async function callSkill($, e, next) {
   if (e.skill !== SKILL) return next(e)
   const text = store.normalize(e.args)
   if (store.modeOf(text) !== 'add') return next(e)
+  // A tool.call answer would precede the permission rules; a deny rule on this call must still win.
+  const { decision } = await $.tool.check({ tool: 'Skill', input: { skill: e.skill, args: e.args } })
+  if (decision === 'deny') return next(e)
   const { root, marker } = await performAdd($, await $.session.cwd(), text, true)
   $.ui.toast(replyFor(marker))
   await showBand($, root)
@@ -232,9 +242,11 @@ async function callSkill($, e, next) {
 
 async function submitPrompt($, e, next) {
   if (capture === null) return next(e)
+  // A notification or a peer's message is not the person's answer: it passes by, the capture stays.
+  if (!CAPTURE_ORIGINS.has(e.origin?.kind)) return next(e)
   const pending = capture
   capture = null
-  if (Date.now() > pending.until || !CAPTURE_ORIGINS.has(e.origin?.kind)) return next(e)
+  if (Date.now() > pending.until) return next(e)
   const text = store.normalize(e.text)
   if (text === '' || text.startsWith('/')) return next(e)
   const { root, marker } = await performAdd($, pending.cwd, text, false)

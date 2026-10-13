@@ -118,19 +118,37 @@ test('bare /backlog asks, then the next prompt is captured and dropped', async (
   assert.equal((await fire($, 'prompt.submit', prompt('a normal prompt'))).passed, true, 'capture is one-shot')
 })
 
-test('a slash command, a blank prompt or a non-user origin cancels the capture', async () => {
-  for (const [text, kind] of [['/help', 'composer'], ['   ', 'composer'], ['from a task', 'task-notification']]) {
+test('a slash command or a blank prompt from the user cancels the capture', async () => {
+  for (const text of ['/help', '   ']) {
     resetCapture()
     const dir = await repo(); const { $, fire } = session(dir)
     await fire($, 'command.run', command('   '))
-    assert.equal((await fire($, 'prompt.submit', prompt(text, kind))).passed, true, `${kind}: ${JSON.stringify(text)}`)
+    assert.equal((await fire($, 'prompt.submit', prompt(text))).passed, true, JSON.stringify(text))
     assert.equal((await fire($, 'prompt.submit', prompt('later text'))).passed, true, 'capture cleared')
     await assert.rejects(read(dir))
   }
+})
+
+test('a prompt from a non-user origin passes by and leaves the capture pending', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', command(''))
+  assert.equal((await fire($, 'prompt.submit', prompt('from a task', 'task-notification'))).passed, true)
+  await assert.rejects(read(dir), 'the notification is not an item')
+  const { passed, out } = await fire($, 'prompt.submit', prompt('fix the flaky test', 'bridge'))
+  assert.equal(passed, false, 'the user\'s next prompt, from the bridge, is still captured')
+  assert.equal(out.drop, 'Added to backlog: fix the flaky test')
 })
 
 test('without a pending capture prompts pass through', async () => {
   resetCapture()
   const dir = await repo(); const { $, fire } = session(dir)
   assert.equal((await fire($, 'prompt.submit', prompt('hello'))).passed, true)
+})
+
+test("a deny rule still blocks Claude's add: the mod passes a denied call through and writes nothing", async () => {
+  const dir = await repo(); const { $, fire } = session(dir, { toolCheck: { decision: 'deny', reason: 'permissions.deny' } })
+  assert.equal((await fire($, 'tool.call', skillCall('backlog:backlog', 'blocked item'))).passed, true)
+  await assert.rejects(read(dir))
+  assert.deepEqual($.log.toasts, [])
 })
