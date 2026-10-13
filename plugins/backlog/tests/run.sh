@@ -130,6 +130,13 @@ if [ -n "$description" ] && [ "${#description}" -le "$DESCRIPTION_MAX_CHARS" ]; 
 else
   echo "FAIL skill description is ${#description} characters, limit $DESCRIPTION_MAX_CHARS"; failed=$((failed + 1))
 fi
+# Tags: the mode table names the filter, and the fallback stores the same field the hooks write.
+# shellcheck disable=SC2016  # literal placeholders from the skill text
+if grep -Fq '`list #<tag>`' "$SKILL_DIR/SKILL.md" && grep -Fq ', tags: ' "$SKILL_DIR/fallback.md" && grep -Fq 'the item has no text' "$SKILL_DIR/fallback.md"; then
+  echo "PASS skill texts describe tags"; passed=$((passed + 1))
+else
+  echo "FAIL SKILL.md must list the list #<tag> mode and fallback.md must store ', tags: ' and refuse 'the item has no text'"; failed=$((failed + 1))
+fi
 
 echo "$passed passed, $failed failed"
 

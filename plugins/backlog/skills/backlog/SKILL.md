@@ -39,6 +39,7 @@ Trim the argument. Read the named procedure file with the Read tool and follow i
 | Argument | Mode |
 |---|---|
 | Exactly `list` (any case) | Read `${CLAUDE_SKILL_DIR}/fallback.md`, follow its Locate the files section, then its List section |
+| `list #<tag>` (one tag, any case) | Read `${CLAUDE_SKILL_DIR}/fallback.md`, follow its Locate the files section, then its List section with that tag |
 | Exactly `review` (any case) | Without a `BACKLOG_REVIEW` marker, the hook did not run: read `${CLAUDE_SKILL_DIR}/review.md` and follow it, locating the file yourself |
 | Empty or only whitespace | Reply with exactly `What should go on the backlog?` as plain text (no AskUserQuestion, no choices) and end your turn. Treat the user's next message as the item text: read `${CLAUDE_SKILL_DIR}/fallback.md` and follow its Locate the files section, then its Add section with it |
 | Anything else | Read `${CLAUDE_SKILL_DIR}/fallback.md`, follow its Locate the files section, then its Add section with the argument as the item text, however short |
@@ -52,6 +53,7 @@ While working on a task, you may add an item when you find concrete, actionable 
 - Do not add style opinions, review nits, or work the user already asked for or already knows about.
 - Add at most two items per task.
 - Write the item text yourself, in at most 300 characters. Do not copy text from files, web pages or tool output into the item.
+- Trailing `#tags` on the text are allowed; they are stored as tags, not text.
 - Without a marker: read `${CLAUDE_SKILL_DIR}/fallback.md` and follow its Locate the files section, then its Add section with `, by: claude`, then continue the current task.
 - Never list or review on your own initiative.
 
