@@ -238,3 +238,41 @@ test('parseTagInput splits on spaces and commas, drops # and invalid tokens, kee
 test('PALETTE has eight distinct colour names', () => {
   assert.equal(new Set(PALETTE).size, 8)
 })
+
+import { setTags } from '../../hooks/store.js'
+
+const TAGGED = '# Backlog\n\n- [ ] alpha (2026-01-01, branch: main, by: claude, tags: auth)\n  - 2026-01-02: note\n- [ ] beta (2026-01-02)\n- [ ] odd (2026-01-03, tags: )\n'
+
+async function taggedDir() {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog'))
+  await writeFile(join(dir, '.backlog/backlog.md'), TAGGED)
+  return dir
+}
+
+test('setTags replaces the field and keeps date, branch and by: claude; sub-bullets stay', async () => {
+  const dir = await taggedDir()
+  const updated = await setTags(io(), dir, 'alpha (2026-01-01, branch: main, by: claude, tags: auth)', ['build', 'urgent'])
+  assert.equal(updated, 'alpha (2026-01-01, branch: main, by: claude, tags: build, urgent)')
+  assert.equal(await read(dir), TAGGED.replace('tags: auth)', 'tags: build, urgent)'))
+})
+
+test('setTags adds a field to an untagged item and clears it with an empty list', async () => {
+  const dir = await taggedDir()
+  assert.equal(await setTags(io(), dir, 'beta (2026-01-02)', ['docs']), 'beta (2026-01-02, tags: docs)')
+  assert.equal(await setTags(io(), dir, 'beta (2026-01-02, tags: docs)', []), 'beta (2026-01-02)')
+  assert.equal(await read(dir), TAGGED)
+})
+
+test('setTags returns null and writes nothing for a vanished line or a line without metadata', async () => {
+  const dir = await taggedDir()
+  assert.equal(await setTags(io(), dir, 'gamma (2026-01-09)', ['x']), null)
+  assert.equal(await setTags(io(), dir, 'no metadata here', ['x']), null)
+  assert.equal(await read(dir), TAGGED)
+})
+
+test('a malformed empty tags field still lists and is rewritten cleanly', async () => {
+  const dir = await taggedDir()
+  assert.ok((await list(io(), dir)).includes('odd (2026-01-03, tags: )'))
+  assert.deepEqual(itemTags('odd (2026-01-03, tags: )'), [])
+  assert.equal(await setTags(io(), dir, 'odd (2026-01-03, tags: )', ['fixed']), 'odd (2026-01-03, tags: fixed)')
+})

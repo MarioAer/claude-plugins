@@ -243,3 +243,18 @@ export function addNote(io, root, item, note) {
     return lines
   })
 }
+
+// Rewrites the tags field of one open item inside the lock, keeping the rest of its metadata.
+// Resolves to the new item text, or null when the line is gone or the item has no metadata.
+export async function setTags(io, root, item, tags) {
+  if (!META.test(item)) return null
+  const base = item.replace(/, tags: [^)]*\)$/, ')')
+  const updated = tags.length > 0 ? base.replace(/\)$/, `, tags: ${tags.join(', ')})`) : base
+  const written = await edit(io, root, (lines) => {
+    const index = lines.indexOf(`- [ ] ${item}`)
+    if (index < 0) return null
+    lines[index] = `- [ ] ${updated}`
+    return lines
+  })
+  return written ? updated : null
+}
