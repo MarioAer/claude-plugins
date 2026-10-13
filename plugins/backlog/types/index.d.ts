@@ -4,6 +4,7 @@ export type ReviewPane = {
   index: number
   noteFor: string | null
   tagsFor: string | null
+  draft: string | null
   done: number
   skipped: number
   notes: number
