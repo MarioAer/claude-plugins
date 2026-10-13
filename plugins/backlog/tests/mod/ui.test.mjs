@@ -160,3 +160,16 @@ test('a list while the pane is open clamps the cursor when the file shrank, and 
   assert.deepEqual(s2.$.log.closed, ['backlog-review'])
   assert.equal((await s2.fire(s2.$, 'ui.render', paneSite)).passed, true)
 })
+
+test('the pane names its keys: plain buttons and a help line in both states', async () => {
+  const dir = await repo(TWO); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  let tree = await pane($, fire)
+  for (const key of ['done', 'skip', 'note', 'close']) {
+    assert.equal(find(tree, (n) => n.type === 'Button' && n.key === key).plain, true, key)
+  }
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.dimColor === true && /d done, s skip, n note, q close\. Tab moves, Enter presses, Esc returns to the prompt\./.test(n.children)))
+  await press(tree, 'note')
+  tree = await pane($, fire)
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.dimColor === true && /Enter saves the note, empty Enter cancels, Esc returns to the prompt\./.test(n.children)))
+})

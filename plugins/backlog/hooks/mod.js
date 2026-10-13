@@ -124,15 +124,24 @@ async function renderPane($, e, next) {
   const { Box, Text, Button, Input } = $.ui.resolve(e)
   const rows = view.items.map((item, index) =>
     Text({ bold: index === pane.index, dimColor: index < pane.index, wrap: 'truncate', children: `${index + 1}. ${item}` }))
-  const controls = pane.noteFor !== null
+  // Plain buttons draw as "d: done", the shape of Claude Code's own survey rows, so each key is visible.
+  const noting = pane.noteFor !== null
+  const controls = noting
     ? [Input({ key: 'note', label: 'Note', placeholder: 'empty cancels', autoFocus: true, onSubmit: (value) => noteAction($, value) })]
     : [
-        Button({ key: 'done', label: 'done', hotkey: 'd', onPress: () => doneAction($) }),
-        Button({ key: 'skip', label: 'skip', hotkey: 's', onPress: () => advance($, 'skipped', false) }),
-        Button({ key: 'note', label: 'note', hotkey: 'n', onPress: () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: v.items[v.pane.index] ?? null } })) }),
-        Button({ key: 'close', label: 'close', hotkey: 'q', onPress: () => $.ui.close({ id: PANE }) }),
+        Button({ key: 'done', label: 'done', hotkey: 'd', plain: true, onPress: () => doneAction($) }),
+        Button({ key: 'skip', label: 'skip', hotkey: 's', plain: true, onPress: () => advance($, 'skipped', false) }),
+        Button({ key: 'note', label: 'note', hotkey: 'n', plain: true, onPress: () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: v.items[v.pane.index] ?? null } })) }),
+        Button({ key: 'close', label: 'close', hotkey: 'q', plain: true, onPress: () => $.ui.close({ id: PANE }) }),
       ]
-  return Box({ flexDirection: 'column', gap: 1, children: [Box({ flexDirection: 'column', children: rows }), Box({ gap: 1, children: controls })] })
+  const help = noting
+    ? 'Enter saves the note, empty Enter cancels, Esc returns to the prompt.'
+    : 'Keys: d done, s skip, n note, q close. Tab moves, Enter presses, Esc returns to the prompt.'
+  return Box({ flexDirection: 'column', gap: 1, children: [
+    Box({ flexDirection: 'column', children: rows }),
+    Box({ gap: 2, children: controls }),
+    Text({ dimColor: true, wrap: 'wrap', children: help }),
+  ] })
 }
 
 async function closePane($, e, next) {
