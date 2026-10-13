@@ -49,8 +49,6 @@ export function colorOf(tag, order) {
   return store.PALETTE[index % store.PALETTE.length]
 }
 
-const withoutTagsField = (item) => item.replace(/, tags: [^)]*\)$/, ')')
-
 // The view's items (display order) and tag order from a fresh read.
 async function loadView(io, root) {
   const { items, order } = await store.listWithOrder(io, root)
@@ -199,7 +197,7 @@ async function renderPane($, e, next) {
     for (const item of group.items) {
       const index = position++
       rows.push(Box({ gap: 1, children: [
-        Text({ bold: index === pane.index, dimColor: index < pane.index, wrap: 'truncate', children: `${index + 1}. ${withoutTagsField(item)}` }),
+        Text({ bold: index === pane.index, dimColor: index < pane.index, wrap: 'truncate', children: `${index + 1}. ${store.withoutTagsField(item)}` }),
         ...store.itemTags(item).map((tag) => Text({ color: colorOf(tag, view.order), children: `#${tag}` })),
       ] }))
     }

@@ -276,3 +276,18 @@ test('a malformed empty tags field still lists and is rewritten cleanly', async 
   assert.deepEqual(itemTags('odd (2026-01-03, tags: )'), [])
   assert.equal(await setTags(io(), dir, 'odd (2026-01-03, tags: )', ['fixed']), 'odd (2026-01-03, tags: fixed)')
 })
+
+import { withoutTagsField } from '../../hooks/store.js'
+
+test("', tags: ' inside the item text is never read or rewritten as a tags field", async () => {
+  const item = 'document the config keys: name, tags: and owner (2026-01-01, branch: main)'
+  assert.deepEqual(itemTags(item), [])
+  assert.deepEqual(itemTags('x (2026-01-01, tags: a, b)'), ['a', 'b'])
+  assert.equal(withoutTagsField(item), item)
+  assert.equal(withoutTagsField('x (2026-01-01, branch: main, tags: a)'), 'x (2026-01-01, branch: main)')
+  assert.deepEqual(tagOrder(`- [ ] ${item}\n- [ ] y (2026-01-02, tags: docs)\n`), ['docs'])
+  const dir = await scratch(); await mkdir(join(dir, '.backlog'))
+  await writeFile(join(dir, '.backlog/backlog.md'), `# Backlog\n\n- [ ] ${item}\n`)
+  assert.equal(await setTags(io(), dir, item, ['docs']), `${item.slice(0, -1)}, tags: docs)`)
+  assert.equal(await read(dir), `# Backlog\n\n- [ ] ${item.slice(0, -1)}, tags: docs)\n`)
+})
