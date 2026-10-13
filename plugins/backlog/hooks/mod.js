@@ -34,6 +34,13 @@ export function replyFor(marker) {
   return `Backlog failed: ${first.replace(/^BACKLOG_FAILED: /, '')}`
 }
 
+// What Claude reads after its own Skill call instead of the skill body: the marker SKILL.md
+// section 0 documents, the one-line reply to give, and the data note.
+export function contextFor(marker) {
+  const first = marker.split('\n')[0]
+  return `${first}\nRecorded by the backlog plugin; the skill text was not loaded. Reply with exactly one line: ${replyFor(marker)}. Then resume the current task without further comment. ${store.DATA_NOTE}`
+}
+
 // Adds text under the session's root; every refusal becomes a BACKLOG_FAILED marker.
 async function performAdd($, cwd, text, byClaude) {
   const io = modsIo($)
@@ -73,6 +80,16 @@ async function runCommand($, e, next) {
   return { text: line }
 }
 
+async function callSkill($, e, next) {
+  if (e.skill !== SKILL) return next(e)
+  const text = store.normalize(e.args)
+  if (store.modeOf(text) !== 'add') return next(e)
+  const { marker } = await performAdd($, await $.session.cwd(), text, true)
+  $.ui.toast(replyFor(marker))
+  return { result: { success: true, commandName: SKILL, status: 'inline' }, context: [contextFor(marker)] }
+}
+
 export const register = (on) => {
   on('command.run', { command: 'backlog:backlog' }, runCommand)
+  on('tool.call', { tool: 'Skill' }, callSkill)
 }
