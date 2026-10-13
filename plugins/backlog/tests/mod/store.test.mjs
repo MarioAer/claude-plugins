@@ -80,3 +80,72 @@ test('list: items, empty file, missing file', async () => {
   const empty = await scratch()
   assert.deepEqual(await list(nodeIo(), empty), [])
 })
+
+import { readFile, utimes, rmdir, access } from 'node:fs/promises'
+import { add, HEADER as H, DATA_NOTE, MAX_LEN } from '../../hooks/store.js'
+
+const io = () => nodeIo({ today: '2026-01-01' })
+const read = (dir) => readFile(join(dir, '.backlog/backlog.md'), 'utf8')
+
+test('add: first add creates folder, .gitignore, header and the line', async () => {
+  const dir = await scratch()
+  const marker = await add(io(), { root: dir, branch: 'main', text: 'add tests', byClaude: false })
+  assert.equal(marker, `BACKLOG_ADDED: add tests\n${DATA_NOTE}`)
+  assert.equal(await readFile(join(dir, '.backlog/.gitignore'), 'utf8'), '*\n')
+  assert.equal(await read(dir), `${H}- [ ] add tests (2026-01-01, branch: main)\n`)
+  await assert.rejects(access(join(dir, '.backlog/.lock')))
+})
+
+test('add: by claude, no branch, appends after a missing trailing newline', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog'))
+  await writeFile(join(dir, '.backlog/backlog.md'), '# Backlog\n\n- [ ] old (2026-01-01)')
+  await add(io(), { root: dir, branch: null, text: 'new', byClaude: true })
+  assert.equal(await read(dir), '# Backlog\n\n- [ ] old (2026-01-01)\n- [ ] new (2026-01-01, by: claude)\n')
+})
+
+test('add: duplicate ignoring case and metadata writes nothing', async () => {
+  const dir = await scratch()
+  await add(io(), { root: dir, branch: 'main', text: 'Dedupe Me', byClaude: false })
+  const before = await read(dir)
+  assert.equal(await add(io(), { root: dir, branch: 'main', text: 'dedupe me', byClaude: true }), `BACKLOG_DUPLICATE: dedupe me\n${DATA_NOTE}`)
+  assert.equal(await read(dir), before)
+})
+
+test('add: text over 2000 characters is refused', async () => {
+  const dir = await scratch()
+  await assert.rejects(add(io(), { root: dir, branch: null, text: 'x'.repeat(MAX_LEN + 1), byClaude: false }),
+    (e) => e instanceof Refused && e.message === `the item is longer than ${MAX_LEN} characters`)
+})
+
+test('add: shell characters are stored literally', async () => {
+  const dir = await scratch()
+  await add(io(), { root: dir, branch: null, text: '$(rm -rf /) `x` "q" \'s\' Ünïcode', byClaude: false })
+  assert.match(await read(dir), /- \[ \] \$\(rm -rf \/\) `x` "q" 's' Ünïcode \(2026-01-01\)\n$/)
+})
+
+test('add: a held lock makes it wait, then refuse with the Python wording', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog/.lock'), { recursive: true })
+  const started = Date.now()
+  await assert.rejects(add(io(), { root: dir, branch: null, text: 'x', byClaude: false }),
+    (e) => e instanceof Refused && e.message === 'the backlog is locked by another session')
+  assert.ok(Date.now() - started >= 900, 'waited about 20 x 50 ms')
+  await rmdir(join(dir, '.backlog/.lock'))
+})
+
+test('add: a stale lock older than 10 s is removed', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog/.lock'), { recursive: true })
+  const old = (Date.now() - 60000) / 1000
+  await utimes(join(dir, '.backlog/.lock'), old, old)
+  await add(io(), { root: dir, branch: null, text: 'x', byClaude: false })
+  assert.match(await read(dir), /- \[ \] x \(2026-01-01\)\n$/)
+})
+
+test('add: two parallel adds produce two intact lines', async () => {
+  const dir = await scratch()
+  await Promise.all([
+    add(io(), { root: dir, branch: null, text: 'one', byClaude: false }),
+    add(io(), { root: dir, branch: null, text: 'two', byClaude: false }),
+  ])
+  const lines = (await read(dir)).split('\n').filter((l) => l.startsWith('- [ ] ')).sort()
+  assert.deepEqual(lines, ['- [ ] one (2026-01-01)', '- [ ] two (2026-01-01)'])
+})

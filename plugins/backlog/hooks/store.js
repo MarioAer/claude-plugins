@@ -69,3 +69,71 @@ export async function list(io, root) {
   await checkLinks(io, folder)
   return openItems((await io.read(`${folder}/backlog.md`)) ?? '')
 }
+
+// The lock is a directory, as in the Python hook, so both implementations serialise against each
+// other across sessions. The file API has no atomic mkdir, hence the subprocess.
+async function acquire(io, lock) {
+  for (let attempt = 0; attempt < LOCK.tries; attempt++) {
+    const made = await io.run(['mkdir', lock], { timeoutMs: 2000 })
+    if (made.exitCode === 0) return
+    const info = await io.stat(lock)
+    if (info && Date.now() - info.mtimeMs > LOCK.staleMs) {
+      await io.run(['rmdir', lock], { timeoutMs: 2000 })
+      continue
+    }
+    await io.sleep(LOCK.waitMs)
+  }
+  throw new Refused('the backlog is locked by another session')
+}
+
+async function release(io, lock) {
+  try { await io.run(['rmdir', lock], { timeoutMs: 2000 }) } catch { /* already gone */ }
+}
+
+// Runs fn inside the lock. Errors other than Refused become "cannot write <folder>: <message>".
+async function withLock(io, folder, fn) {
+  await checkLinks(io, folder)
+  const lock = `${folder}/.lock`
+  try {
+    if (!(await io.stat(folder))) await io.write(`${folder}/.gitignore`, '*\n')
+    await acquire(io, lock)
+  } catch (error) {
+    if (error instanceof Refused) throw error
+    throw new Refused(`cannot write ${folder}: ${error.message}`)
+  }
+  try {
+    await checkLinks(io, folder)
+    return await fn()
+  } catch (error) {
+    if (error instanceof Refused) throw error
+    throw new Refused(`cannot write ${folder}: ${error.message}`)
+  } finally {
+    await release(io, lock)
+  }
+}
+
+export async function add(io, { root, branch, text, byClaude }) {
+  if (text.length > MAX_LEN) throw new Refused(`the item is longer than ${MAX_LEN} characters`)
+  const folder = `${root}/.backlog`
+  return withLock(io, folder, async () => {
+    const ignore = `${folder}/.gitignore`
+    if (!(await io.stat(ignore))) await io.write(ignore, '*\n')
+    const path = `${folder}/backlog.md`
+    let content = await io.read(path)
+    if (content === null) {
+      content = HEADER
+      await io.write(path, HEADER)
+    }
+    const wanted = text.toLowerCase()
+    for (const item of openItems(content)) {
+      if (stripMeta(item).toLowerCase() === wanted) return `BACKLOG_DUPLICATE: ${text}\n${DATA_NOTE}`
+    }
+    const meta = [io.today()]
+    if (branch) meta.push(`branch: ${branch}`)
+    if (byClaude) meta.push('by: claude')
+    let line = `- [ ] ${text} (${meta.join(', ')})\n`
+    if (content.length > 0 && !content.endsWith('\n')) line = `\n${line}`
+    await io.write(path, content + line)
+    return `BACKLOG_ADDED: ${text}\n${DATA_NOTE}`
+  })
+}
