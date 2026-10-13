@@ -41,3 +41,8 @@ Scenarios for `plugins/backlog/skills/backlog/SKILL.md`. Rows marked `e2e` run h
 | S26 | e2e | Git repo, hooks enabled | `/backlog hook path item` | No tool call in the transcript; item written once |
 | S27 | e2e | Hooks disabled (`disableAllHooks`); fallback tools approved | `/backlog fallback item` | The skill's fallback adds the item |
 | S28 | e2e | Git repo, hooks enabled | Prompt asks Claude to record an item with the skill | Only the `Skill` call in the transcript; item carries `, by: claude)` |
+| S29 | e2e | Git repo, mod loaded (Claude Code 2.1.287 or later) | `/backlog mod item` | The mod answers: no model turn (`num_turns` 0); output `Added to backlog: mod item`; item written once |
+| S30 | e2e | Git repo, mod loaded | Prompt asks Claude to record an item with the skill | Only the `Skill` call; the skill body (`## 0. Hook result`) never enters the transcript; item carries `, by: claude)` |
+| S31 | e2e | Mod loaded, 1 open item | `/backlog list` | No model turn; output is the numbered list |
+| S32 | manual | Interactive terminal, 2 open items | `/backlog review`; keys `s`, `n` + note, `d` | Pane opens focused; skip, note written under item 1 at once, item 2 marked done; pane closes with `Review done: 1 done, 1 skipped, 1 notes`; band shows `Backlog: 1 open` for about ten seconds after an add |
+| S33 | manual | Interactive terminal | `/backlog`, then type `fix the flaky test` | Question printed by the command; the next prompt is dropped with `Added to backlog: fix the flaky test`; no model turn |

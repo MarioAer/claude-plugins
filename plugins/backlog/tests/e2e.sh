@@ -50,6 +50,21 @@ tool_calls() {
 }
 no_output() { [ -z "$1" ]; }
 
+# One headless run as a JSON result object; the mod answers typed commands without a turn.
+backlog_json() {
+  local prompt=$1; shift
+  claude -p "$prompt" --plugin-dir "$PLUGIN" --model "$MODEL" --strict-mcp-config \
+    --setting-sources project,local --permission-mode default --max-turns 12 --output-format json "$@" </dev/null 2>/dev/null \
+    | jq -c 'if type == "array" then .[] | select(.type == "result") else . end'
+}
+# The whole stream-json transcript of one headless run, for text that must or must not appear.
+transcript() {
+  local prompt=$1; shift
+  claude -p "$prompt" --plugin-dir "$PLUGIN" --model "$MODEL" --strict-mcp-config \
+    --setting-sources project,local --permission-mode default --max-turns 12 \
+    --output-format stream-json --verbose "$@" </dev/null 2>/dev/null
+}
+
 # --- Scenarios (IDs match tests/scenarios.md next to this script) ---
 
 S1() {
@@ -235,7 +250,34 @@ S28() {
   check "item carries by: claude" has_line .backlog/backlog.md "- [ ] self initiated item ($TODAY, branch: main, by: claude)"
 }
 
-ALL=(S1 S2 S3 S4 S5 S8 S10 S11 S13 S14 S15 S16 S17 S18 S19 S20 S21 S22 S23 S24 S26 S27 S28)
+# --- Mod (Claude Code 2.1.287 or later) ---
+
+S29() {
+  new_repo "$WORK/s29"
+  out=$(backlog_json "/backlog mod item")
+  check "typed add starts no model turn" [ "$(jq -r '.num_turns' <<<"$out")" = "0" ]
+  check "command output confirms" contains "$(jq -r '.result' <<<"$out")" "Added to backlog: mod item"
+  check "item written once" line_count .backlog/backlog.md "mod item" 1
+}
+
+S30() {
+  new_repo "$WORK/s30"
+  log=$(transcript "Use the backlog skill to record the item 'mod self item'. Do nothing else.")
+  calls=$(jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") | .name' <<<"$log")
+  check "Claude's add makes only the Skill call" [ "$calls" = "Skill" ]
+  check "skill body not loaded" lacks "$log" "## 0. Hook result"
+  check "item carries by: claude" has_line .backlog/backlog.md "- [ ] mod self item ($TODAY, branch: main, by: claude)"
+}
+
+S31() {
+  new_repo "$WORK/s31"
+  mkdir .backlog && printf '# Backlog\n\n- [ ] alpha (2026-01-01)\n' >.backlog/backlog.md
+  out=$(backlog_json "/backlog list")
+  check "typed list starts no model turn" [ "$(jq -r '.num_turns' <<<"$out")" = "0" ]
+  check "list text" contains "$(jq -r '.result' <<<"$out")" "1. alpha (2026-01-01)"
+}
+
+ALL=(S1 S2 S3 S4 S5 S8 S10 S11 S13 S14 S15 S16 S17 S18 S19 S20 S21 S22 S23 S24 S26 S27 S28 S29 S30 S31)
 [ $# -gt 0 ] && ALL=("$@")
 
 echo "backlog e2e: model=$MODEL, $(claude --version 2>/dev/null)"
