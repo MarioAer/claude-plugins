@@ -46,3 +46,7 @@ Scenarios for `plugins/backlog/skills/backlog/SKILL.md`. Rows marked `e2e` run h
 | S31 | e2e | Mod loaded, 1 open item | `/backlog list` | No model turn; output is the numbered list |
 | S32 | manual | Interactive terminal, 2 open items | `/backlog review`; keys `s`, `n` + note, `d` | Pane opens focused; skip, note written under item 1 at once, item 2 marked done; pane closes with `Review done: 1 done, 1 skipped, 1 notes`; band shows `Backlog: 1 open` for about ten seconds after an add |
 | S33 | manual | Interactive terminal | `/backlog`, then type `fix the flaky test` | Question printed by the command; the next prompt is dropped with `Added to backlog: fix the flaky test`; no model turn |
+| S34 | e2e | Git repo, mod loaded | `/backlog tagged item #Auth #urgent` | No model turn; `Added to backlog: tagged item`; line ends `tags: auth, urgent)` |
+| S35 | e2e | Mod loaded, one tagged and one untagged item | `/backlog list #auth` | No model turn; only the tagged item is listed |
+| S36 | e2e | Hooks disabled, fallback tools approved | `/backlog fallback tagged #ops` | The skill's fallback stores `, tags: ops` |
+| S37 | manual | Interactive terminal, items with two tags and one without | `/backlog review`; `t`, type `docs`, Enter | Pane shows one heading per tag in its own colour, untagged last; the item moves under `#docs` with the cursor on it; `list #docs` then shows it |

@@ -15,9 +15,10 @@ Records tasks you want to defer while Claude Code keeps working on the current t
 
 | Command | Action |
 |---|---|
-| `/backlog <text>` | Add an item, confirm in one line, resume the current task. |
+| `/backlog <text>` | Add an item, confirm in one line, resume the current task. Trailing `#tags` (letters, digits, `-`, `_`, up to 8) are stored as tags. |
 | `/backlog` | Ask once for the text, then add it. |
 | `/backlog list` | Show open items as a numbered list. |
+| `/backlog list #<tag>` | Show only the open items carrying that tag. |
 | `/backlog review` | For each open item, answer done, skip, update or quit; changes are shown, then written once. |
 
 If another skill or command already uses the name `backlog`, use the namespaced form `/backlog:backlog`.
@@ -28,9 +29,11 @@ Item format:
 - [ ] add tests for the parser (2026-10-06, branch: feature/parser)
 - [x] remove dead retry helper (2026-10-02, branch: main, by: claude)
   - 2026-10-04: blocked by API change
+- [ ] fix login (2026-10-05, branch: main, tags: auth, urgent)
 ```
 
 - The branch is omitted outside git and on a detached HEAD.
+- Tags are lowercase names inside the metadata; two items that differ only by their tags are duplicates.
 - `by: claude` marks items Claude added on its own: concrete, out-of-scope work found during a task, at most two per task.
 - An argument of exactly `list` or `review` selects that mode; any other text, including `review the auth code`, is added as an item.
 
@@ -42,6 +45,7 @@ On Claude Code 2.1.287 or later the plugin also loads a mod (`hooks/mod.js`, a h
 - Claude's own `Skill(backlog:backlog)` call is answered by the mod: the item is recorded, Claude reads one context line instead of the skill text, and confirms in one line (about 30 tokens).
 - Every add, duplicate or failure shows a toast. A band above the prompt shows `Backlog: N open` for ten seconds after any backlog call and while review is open; it is never shown otherwise.
 - `/backlog review` opens a pane with the open items and the keys `d` (done), `s` (skip), `n` (note) and `q` (close); each action is written at once. In headless runs, the VS Code extension and the SDK, where nothing is drawn, review falls back to the question loop below.
+- The pane groups items by their first tag, one heading per tag in its own colour (stable while the tag exists in the file), untagged items last. `t` edits the current item's tags: space or comma separated, `#` optional, empty clears; invalid names are named in a toast and dropped.
 
 Where the mod does not load (older versions, `--safe-mode`, `disableAllHooks`, WSL sessions in the desktop app), everything behaves as in 0.2.1: the command hook performs adds and lists and the skill handles the rest.
 
