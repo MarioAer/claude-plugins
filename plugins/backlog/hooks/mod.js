@@ -8,6 +8,13 @@ import { localDate } from './io.js'
 const SKILL = 'backlog:backlog'
 const INSIDE = 'BACKLOG_FAILED: the session directory is inside .git or .claude'
 
+// A bare /backlog remembers the session's cwd; the next prompt typed by the person is the item.
+const CAPTURE_MS = 10 * 60 * 1000
+const CAPTURE_ORIGINS = new Set(['composer', 'sdk'])
+let capture = null
+
+export function resetCapture() { capture = null }
+
 // The store's io interface over the mods API, declared here because the validator follows $ only
 // into functions of this file. fs.read and fs.stat reject when the path is missing; the store wants
 // null there. fs.write creates parent directories, as the store relies on.
@@ -71,7 +78,10 @@ async function runCommand($, e, next) {
   const text = store.normalize(e.args)
   const mode = store.modeOf(text)
   const cwd = await $.session.cwd()
-  if (mode === 'empty') return { text: 'What should go on the backlog?' }
+  if (mode === 'empty') {
+    capture = { cwd, until: Date.now() + CAPTURE_MS }
+    return { text: 'What should go on the backlog?' }
+  }
   if (mode === 'review') return next(e)
   if (mode === 'list') return { text: (await listText($, cwd)).text }
   const { marker } = await performAdd($, cwd, text, false)
@@ -89,7 +99,21 @@ async function callSkill($, e, next) {
   return { result: { success: true, commandName: SKILL, status: 'inline' }, context: [contextFor(marker)] }
 }
 
+async function submitPrompt($, e, next) {
+  if (capture === null) return next(e)
+  const pending = capture
+  capture = null
+  if (Date.now() > pending.until || !CAPTURE_ORIGINS.has(e.origin?.kind)) return next(e)
+  const text = store.normalize(e.text)
+  if (text === '' || text.startsWith('/')) return next(e)
+  const { marker } = await performAdd($, pending.cwd, text, false)
+  const line = replyFor(marker)
+  $.ui.toast(line)
+  return { drop: line }
+}
+
 export const register = (on) => {
   on('command.run', { command: 'backlog:backlog' }, runCommand)
   on('tool.call', { tool: 'Skill' }, callSkill)
+  on('prompt.submit', submitPrompt)
 }

@@ -102,3 +102,35 @@ test('other skills, list and review from the Skill tool pass through', async () 
   assert.equal((await fire($, 'tool.call', skillCall('backlog:backlog', 'review'))).passed, true)
   assert.equal((await fire($, 'tool.call', { tool: 'Read', tool_use_id: 't', file_path: 'a' })).passed, true)
 })
+
+import { resetCapture } from '../../hooks/mod.js'
+
+const prompt = (text, kind = 'composer') => ({ text, wait: false, origin: { kind } })
+
+test('bare /backlog asks, then the next prompt is captured and dropped', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  assert.equal((await fire($, 'command.run', command(''))).out.text, 'What should go on the backlog?')
+  const { passed, out } = await fire($, 'prompt.submit', prompt('captured item'))
+  assert.equal(passed, false)
+  assert.equal(out.drop, 'Added to backlog: captured item')
+  assert.match(await read(dir), /- \[ \] captured item \(/)
+  assert.equal((await fire($, 'prompt.submit', prompt('a normal prompt'))).passed, true, 'capture is one-shot')
+})
+
+test('a slash command, a blank prompt or a non-user origin cancels the capture', async () => {
+  for (const [text, kind] of [['/help', 'composer'], ['   ', 'composer'], ['from a task', 'task-notification']]) {
+    resetCapture()
+    const dir = await repo(); const { $, fire } = session(dir)
+    await fire($, 'command.run', command('   '))
+    assert.equal((await fire($, 'prompt.submit', prompt(text, kind))).passed, true, `${kind}: ${JSON.stringify(text)}`)
+    assert.equal((await fire($, 'prompt.submit', prompt('later text'))).passed, true, 'capture cleared')
+    await assert.rejects(read(dir))
+  }
+})
+
+test('without a pending capture prompts pass through', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  assert.equal((await fire($, 'prompt.submit', prompt('hello'))).passed, true)
+})
