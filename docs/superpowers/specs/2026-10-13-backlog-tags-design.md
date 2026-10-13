@@ -44,8 +44,12 @@ Metadata regex, in both implementations:
 \s\(\d{4}-\d{2}-\d{2}(, branch: [^,)]*)?(, by: claude)?(, tags: [^)]*)?\)$
 ```
 
-The 0.2.1 and 0.3.0 regex already treats the whole parenthesis as metadata, so a tagged line is
-read as its text by older readers; a line without `tags:` is read by 0.4.0 as untagged.
+A line without `tags:` is read by 0.4.0 exactly as before. The reverse is partial: the 0.2.1 and
+0.3.0 regex has no `tags:` group, so those versions do not recognise a tagged line's parenthesis as
+metadata. They still list it and mark it done (those match the whole line), but their duplicate
+check compares the whole line, so an older session can add a second `fix login` next to a tagged
+one, and the 0.3.0 pane's toast shows the line with its parenthesis. This is documented in the
+README as the one limit of mixing versions; no file is corrupted either way.
 
 ## Tag rules (identical in Python and JavaScript)
 

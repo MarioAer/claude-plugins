@@ -34,6 +34,7 @@ Item format:
 
 - The branch is omitted outside git and on a detached HEAD.
 - Tags are lowercase names inside the metadata; two items that differ only by their tags are duplicates.
+- Files with tagged items stay readable by backlog 0.3.0 and earlier, with one limit: those versions do not recognise the tagged parenthesis as metadata, so their duplicate check can add a second copy of a tagged item.
 - `by: claude` marks items Claude added on its own: concrete, out-of-scope work found during a task, at most two per task.
 - An argument of exactly `list` or `review` selects that mode; any other text, including `review the auth code`, is added as an item.
 
