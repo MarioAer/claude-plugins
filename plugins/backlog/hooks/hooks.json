@@ -1,4 +1,7 @@
 {
+  "modules": [
+    "./mod.js"
+  ],
   "hooks": {
     "SessionStart": [
       {
