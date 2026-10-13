@@ -40,13 +40,21 @@ def run(case):
                 with open(os.path.join(root, ".backlog", name), "w", encoding="utf-8") as fh:
                     fh.write(content)
         if case["op"] == "add":
-            got = hook.add(root, case["branch"], case["text"], case["byClaude"])
-            if got != fill(case["expect"]["marker"]):
-                return f"marker {got!r}"
+            if "refused" in case["expect"]:
+                try:
+                    hook.add(root, case["branch"], case["text"], case["byClaude"])
+                    return "expected a refusal"
+                except hook.Refused as exc:
+                    if str(exc) != case["expect"]["refused"]:
+                        return f"refusal {exc!s}"
+            else:
+                got = hook.add(root, case["branch"], case["text"], case["byClaude"])
+                if got != fill(case["expect"]["marker"]):
+                    return f"marker {got!r}"
         elif case["op"] == "list":
             items = case["expect"]["items"]
             want = f"BACKLOG_LIST:\n{hook.numbered(items)}\n{hook.DATA_NOTE}" if items else "BACKLOG_LIST: Backlog is empty."
-            got = hook.list_items(root)
+            got = hook.list_items(root, case.get("tag"))
             if got != want:
                 return f"list {got!r}"
         else:

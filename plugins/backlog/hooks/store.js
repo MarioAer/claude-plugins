@@ -130,10 +130,11 @@ export async function checkLinks(io, folder) {
   }
 }
 
-export async function list(io, root) {
+export async function list(io, root, tag = null) {
   const folder = `${root}/.backlog`
   await checkLinks(io, folder)
-  return openItems((await io.read(`${folder}/backlog.md`)) ?? '')
+  const items = openItems((await io.read(`${folder}/backlog.md`)) ?? '')
+  return tag === null ? items : items.filter((item) => itemTags(item).includes(tag))
 }
 
 // The lock is a directory, as in the Python hook, so both implementations serialise against each
@@ -178,8 +179,10 @@ async function withLock(io, folder, fn) {
   }
 }
 
-export async function add(io, { root, branch, text, byClaude }) {
-  if (text.length > MAX_LEN) throw new Refused(`the item is longer than ${MAX_LEN} characters`)
+export async function add(io, { root, branch, text: raw, byClaude }) {
+  if (raw.length > MAX_LEN) throw new Refused(`the item is longer than ${MAX_LEN} characters`)
+  const { text, tags } = splitTags(raw)
+  if (text === '') throw new Refused('the item has no text')
   const folder = `${root}/.backlog`
   return withLock(io, folder, async () => {
     const ignore = `${folder}/.gitignore`
@@ -197,6 +200,7 @@ export async function add(io, { root, branch, text, byClaude }) {
     const meta = [io.today()]
     if (branch) meta.push(`branch: ${branch}`)
     if (byClaude) meta.push('by: claude')
+    if (tags.length > 0) meta.push(`tags: ${tags.join(', ')}`)
     let line = `- [ ] ${text} (${meta.join(', ')})\n`
     if (content.length > 0 && !content.endsWith('\n')) line = `\n${line}`
     await io.write(path, content + line)
