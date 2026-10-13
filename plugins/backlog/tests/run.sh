@@ -136,4 +136,12 @@ echo "$passed passed, $failed failed"
 # The add hook has its own fixtures; run them here so CI needs one entry point.
 echo
 bash "$ROOT/tests/add-hook.sh" || failed=$((failed + 1))
+
+# The mod's tests need Node 22 or later (node:test); the hook tests above do not.
+echo
+if command -v node >/dev/null 2>&1; then
+  node --test "$ROOT/tests/mod/*.test.mjs" || failed=$((failed + 1))
+else
+  echo "SKIP mod tests: node not on PATH"
+fi
 [ "$failed" -eq 0 ]
