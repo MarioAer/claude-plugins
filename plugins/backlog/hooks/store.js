@@ -34,3 +34,38 @@ export function stripMeta(item) {
 export function numbered(items) {
   return items.map((item, index) => `${index + 1}. ${item}`).join('\n')
 }
+
+// Root and branch from one git call; outside a repository, (cwd, null). The branch is read from the
+// HEAD file so an unborn branch keeps its name. git prints the physical root path.
+export async function locate(io, cwd) {
+  let result
+  try {
+    result = await io.run(['git', '-C', cwd, 'rev-parse', '--show-toplevel', '--git-path', 'HEAD'], { cwd, timeoutMs: 2000 })
+  } catch {
+    return { root: cwd, branch: null }
+  }
+  const lines = result.exitCode === 0 ? result.stdout.trim().split('\n') : []
+  if (lines.length < 2) return { root: cwd, branch: null }
+  const headPath = lines[1].startsWith('/') ? lines[1] : `${cwd}/${lines[1]}`
+  const head = ((await io.read(headPath)) ?? '').trim()
+  const ref = /^ref: refs\/heads\/(.+)$/.exec(head)
+  return { root: lines[0], branch: ref ? ref[1] : null }
+}
+
+export function rootRefused(root) {
+  const parts = root.split('/')
+  return parts.includes('.git') || parts.includes('.claude')
+}
+
+export async function checkLinks(io, folder) {
+  for (const path of [folder, `${folder}/backlog.md`, `${folder}/.gitignore`]) {
+    const info = await io.stat(path)
+    if (info && info.isLink) throw new Refused(`${path} is a symlink`)
+  }
+}
+
+export async function list(io, root) {
+  const folder = `${root}/.backlog`
+  await checkLinks(io, folder)
+  return openItems((await io.read(`${folder}/backlog.md`)) ?? '')
+}
