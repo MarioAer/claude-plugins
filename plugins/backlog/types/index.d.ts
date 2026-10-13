@@ -11,6 +11,7 @@ export type ReviewPane = {
 export type View = {
   root: string | null
   items: string[]
+  order: string[]
   bandUntil: number
   pane: ReviewPane | null
 }

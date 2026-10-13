@@ -258,3 +258,11 @@ export async function setTags(io, root, item, tags) {
   })
   return written ? updated : null
 }
+
+// The open items and the colour order from one read, for the pane.
+export async function listWithOrder(io, root) {
+  const folder = `${root}/.backlog`
+  await checkLinks(io, folder)
+  const content = (await io.read(`${folder}/backlog.md`)) ?? ''
+  return { items: openItems(content), order: tagOrder(content) }
+}

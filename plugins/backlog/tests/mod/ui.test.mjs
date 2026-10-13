@@ -173,3 +173,48 @@ test('the pane names its keys: plain buttons and a help line in both states', as
   tree = await pane($, fire)
   assert.ok(find(tree, (n) => n.type === 'Text' && n.dimColor === true && /Enter saves the note, empty Enter cancels, Esc returns to the prompt\./.test(n.children)))
 })
+
+import { arrange, colorOf } from '../../hooks/mod.js'
+import { PALETTE } from '../../hooks/store.js'
+
+const TAGGED3 = '# Backlog\n\n- [x] old (2026-01-01, tags: build)\n- [ ] a (2026-01-02, tags: auth, build)\n- [ ] b (2026-01-03)\n- [ ] c (2026-01-04, tags: build)\n'
+
+test('arrange groups by first tag in tag order, untagged last, empty groups dropped', () => {
+  const items = ['a (2026-01-02, tags: auth, build)', 'b (2026-01-03)', 'c (2026-01-04, tags: build)']
+  assert.deepEqual(arrange(items, ['build', 'auth']), [
+    { tag: 'build', items: ['c (2026-01-04, tags: build)'] },
+    { tag: 'auth', items: ['a (2026-01-02, tags: auth, build)'] },
+    { tag: null, items: ['b (2026-01-03)'] },
+  ])
+  assert.deepEqual(arrange([], ['build']), [])
+  assert.equal(colorOf('auth', ['build', 'auth']), PALETTE[1])
+  assert.equal(colorOf('ninth', ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'ninth']), PALETTE[0])
+})
+
+test('the pane draws coloured group headings, rows in display order and tag chips', async () => {
+  const dir = await repo(TAGGED3); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  const tree = await pane($, fire)
+  const headings = []
+  find(tree, (n) => { if (n.type === 'Text' && n.bold === true && /^(#|untagged)/.test(String(n.children))) headings.push([n.children, n.color]); return false })
+  assert.deepEqual(headings, [['#build', PALETTE[0]], ['#auth', PALETTE[1]], ['untagged', undefined]])
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '1. c (2026-01-04)' && n.bold === true), 'first row is the build item, tags field stripped')
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '#build' && n.color === PALETTE[0] && n.bold !== true), 'tag chip beside the row')
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '2. a (2026-01-02)'))
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '3. b (2026-01-03)'))
+})
+
+test('the cursor walks rows in display order and colours stay stable after done', async () => {
+  const dir = await repo(TAGGED3); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  await press(await pane($, fire), 'skip')
+  let tree = await pane($, fire)
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '2. a (2026-01-02)' && n.bold === true))
+  await press(tree, 'done')
+  assert.match(await read(dir), /- \[x\] a \(2026-01-02, tags: auth, build\)/)
+  tree = await pane($, fire)
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '#auth' && n.bold !== true) === null, 'no auth chip left among open rows')
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '1. c (2026-01-04)'))
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '#build' && n.color === PALETTE[0]), 'build keeps its colour')
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '2. b (2026-01-03)' && n.bold === true), 'cursor on the next row')
+})

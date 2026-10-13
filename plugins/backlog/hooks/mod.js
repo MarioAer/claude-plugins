@@ -17,7 +17,7 @@ export function resetCapture() { capture = null }
 
 // What the band and the pane draw from. Written only from events, never while drawing.
 const BAND_MS = 10000
-const EMPTY_VIEW = { root: null, items: [], bandUntil: 0, pane: null }
+const EMPTY_VIEW = { root: null, items: [], order: [], bandUntil: 0, pane: null }
 
 async function getView($) {
   const { value } = await $.state.get({ plugin: 'backlog', key: 'view' })
@@ -31,14 +31,40 @@ async function setView($, change) {
   return next
 }
 
+// Open items in display order: one group per tag in `order`, each item under its first tag,
+// untagged items last; empty groups are dropped. Exported for tests.
+export function arrange(items, order) {
+  const groups = order.map((tag) => ({ tag, items: [] }))
+  const untagged = { tag: null, items: [] }
+  for (const item of items) {
+    const first = store.itemTags(item)[0]
+    const group = first === undefined ? undefined : groups.find((g) => g.tag === first)
+    ;(group ?? untagged).items.push(item)
+  }
+  return [...groups, untagged].filter((g) => g.items.length > 0)
+}
+
+export function colorOf(tag, order) {
+  const index = Math.max(order.indexOf(tag), 0)
+  return store.PALETTE[index % store.PALETTE.length]
+}
+
+const withoutTagsField = (item) => item.replace(/, tags: [^)]*\)$/, ')')
+
+// The view's items (display order) and tag order from a fresh read.
+async function loadView(io, root) {
+  const { items, order } = await store.listWithOrder(io, root)
+  return { items: arrange(items, order).flatMap((g) => g.items), order }
+}
+
 // Refreshes the open items and shows the band for BAND_MS; a timer redraws once it lapses.
 async function showBand($, root) {
-  let items = []
-  try { items = await store.list(modsIo($), root) } catch { /* the refusal was already reported */ }
+  let loaded = { items: [], order: [] }
+  try { loaded = await loadView(modsIo($), root) } catch { /* the refusal was already reported */ }
   // An open pane keeps its cursor, clamped to the fresh list; an emptied list ends the review.
   const before = await getView($)
-  const pane = before.pane && items.length > 0 ? { ...before.pane, index: Math.min(before.pane.index, items.length - 1) } : null
-  await setView($, (current) => ({ ...current, root, items, bandUntil: Date.now() + BAND_MS, pane }))
+  const pane = before.pane && loaded.items.length > 0 ? { ...before.pane, index: Math.min(before.pane.index, loaded.items.length - 1) } : null
+  await setView($, (current) => ({ ...current, root, ...loaded, bandUntil: Date.now() + BAND_MS, pane }))
   if (before.pane !== null && pane === null) {
     await $.ui.close({ id: PANE })
     $.ui.toast(`Review done: ${before.pane.done} done, ${before.pane.skipped} skipped, ${before.pane.notes} notes`)
@@ -54,14 +80,15 @@ async function renderBand($, e, next) {
   const { Box, Text, Button } = $.ui.resolve(e)
   return Box({ gap: 1, children: [
     Text({ dimColor: true, children: `Backlog: ${view.items.length} open` }),
-    Button({ key: 'review', label: 'review', hotkey: 'r', plain: true, onPress: () => openPane($, view.root, view.items) }),
+    Button({ key: 'review', label: 'review', hotkey: 'r', plain: true, onPress: () => openPane($, view.root) }),
   ] })
 }
 
 const PANE = 'backlog-review'
 
-async function openPane($, root, items) {
-  await setView($, (view) => ({ ...view, root, items, pane: { index: 0, noteFor: null, done: 0, skipped: 0, notes: 0 } }))
+async function openPane($, root) {
+  const loaded = await loadView(modsIo($), root)
+  await setView($, (view) => ({ ...view, root, ...loaded, pane: { index: 0, noteFor: null, done: 0, skipped: 0, notes: 0 } }))
   await $.ui.open({ id: PANE, title: 'Backlog review', focus: true, closeOnEscape: true })
 }
 
@@ -70,16 +97,17 @@ async function openPane($, root, items) {
 async function advance($, counter, removed) {
   const view = await getView($)
   if (view.pane === null) return
-  let items = view.items
-  try { items = await store.list(modsIo($), view.root) } catch { /* keep what was shown */ }
+  let loaded = { items: view.items, order: view.order }
+  try { loaded = await loadView(modsIo($), view.root) } catch { /* keep what was shown */ }
+  const items = loaded.items
   const pane = { ...view.pane, noteFor: null, [counter]: view.pane[counter] + 1, index: view.pane.index + (removed ? 0 : 1) }
   if (pane.index >= items.length) {
-    await setView($, (v) => ({ ...v, items, pane: null }))
+    await setView($, (v) => ({ ...v, ...loaded, pane: null }))
     await $.ui.close({ id: PANE })
     $.ui.toast(`Review done: ${pane.done} done, ${pane.skipped} skipped, ${pane.notes} notes`)
     return
   }
-  await setView($, (v) => ({ ...v, items, pane }))
+  await setView($, (v) => ({ ...v, ...loaded, pane }))
 }
 
 async function doneAction($) {
@@ -122,8 +150,21 @@ async function renderPane($, e, next) {
   const pane = view.pane
   if (pane === null) return next(e)
   const { Box, Text, Button, Input } = $.ui.resolve(e)
-  const rows = view.items.map((item, index) =>
-    Text({ bold: index === pane.index, dimColor: index < pane.index, wrap: 'truncate', children: `${index + 1}. ${item}` }))
+  const groups = arrange(view.items, view.order)
+  const rows = []
+  let position = 0
+  for (const group of groups) {
+    rows.push(group.tag === null
+      ? Text({ bold: true, dimColor: true, children: 'untagged' })
+      : Text({ bold: true, color: colorOf(group.tag, view.order), children: `#${group.tag}` }))
+    for (const item of group.items) {
+      const index = position++
+      rows.push(Box({ gap: 1, children: [
+        Text({ bold: index === pane.index, dimColor: index < pane.index, wrap: 'truncate', children: `${index + 1}. ${withoutTagsField(item)}` }),
+        ...store.itemTags(item).map((tag) => Text({ color: colorOf(tag, view.order), children: `#${tag}` })),
+      ] }))
+    }
+  }
   // Plain buttons draw as "d: done", the shape of Claude Code's own survey rows, so each key is visible.
   const noting = pane.noteFor !== null
   const controls = noting
@@ -221,7 +262,7 @@ async function runCommand($, e, next) {
     const listed = await listText($, cwd)
     if (!listed.items) return { text: listed.text }
     if (listed.items.length === 0) return { text: 'Backlog is empty.' }
-    await openPane($, listed.root, listed.items)
+    await openPane($, listed.root)
     return { text: 'Backlog review opened.' }
   }
   if (mode === 'list' || mode === 'list-tag') {
