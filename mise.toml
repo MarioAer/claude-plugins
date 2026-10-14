@@ -1,0 +1,57 @@
+# Dev tools and tasks for this repo. `mise run setup` once per clone; `mise tasks` lists the rest.
+[settings]
+lockfile = true
+
+# On PATH inside the repo. claude and gh are pinned per task instead, so they never shadow your own.
+[tools]
+node = "24"
+# The oldest python3 the hooks support (macOS ships 3.9), so tests catch newer-only syntax.
+python = "3.9"
+jq = "1"
+shellcheck = "0"
+shfmt = "3"
+
+[tasks.setup]
+description = "Install the pinned tools and the git pre-commit hook"
+run = [
+  "mise install",
+  "mise generate git-pre-commit --write --task pre-commit",
+]
+
+[tasks.pre-commit]
+description = "Fast checks run by the git hook"
+depends = ["lint", "validate"]
+
+[tasks.lint]
+description = "ShellCheck and shfmt check every shell script"
+run = [
+  "git ls-files -z '*.sh' '.mise/tasks/*' | xargs -0 shellcheck",
+  "git ls-files -z '*.sh' '.mise/tasks/*' | xargs -0 shfmt -d",
+]
+
+[tasks.fmt]
+description = "Format every shell script with shfmt"
+run = "git ls-files -z '*.sh' '.mise/tasks/*' | xargs -0 shfmt -w"
+
+[tasks.validate]
+description = "Structural tests, claude plugin validate included"
+tools.claude = "2.1.293"
+run = "bash tests/validate.sh"
+
+[tasks.test]
+description = "Every plugin's unit suite"
+tools.claude = "2.1.293"
+run = "bash tests/unit.sh"
+
+[tasks.check]
+description = "Everything CI runs"
+depends = ["lint", "validate", "test"]
+
+[tasks."test:e2e"]
+description = "A plugin's end-to-end scenarios (calls the Claude API, costs tokens)"
+tools.claude = "2.1.293"
+usage = '''
+arg "<plugin>" help="Plugin directory under plugins/"
+arg "[scenario]..." help="Scenario ids (default: all)" var=#true
+'''
+run = 'bash "plugins/${usage_plugin?}/tests/e2e.sh" ${usage_scenario:-}'

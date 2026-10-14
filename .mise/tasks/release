@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#MISE description="Tag a plugin's current version on main; CI publishes the release"
+#MISE tools={gh="2"}
+#USAGE arg "<plugin>" help="Plugin directory under plugins/"
+set -euo pipefail
+
+plugin=${usage_plugin:?}
+manifest="plugins/$plugin/.claude-plugin/plugin.json"
+[ -f "$manifest" ] || {
+  echo "no such plugin: $plugin" >&2
+  exit 1
+}
+tag="$plugin-v$(jq -r .version "$manifest")"
+
+[ "$(git branch --show-current)" = main ] || {
+  echo "switch to main first" >&2
+  exit 1
+}
+[ -z "$(git status --porcelain)" ] || {
+  echo "working tree is not clean" >&2
+  exit 1
+}
+git fetch --quiet --tags origin main
+[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || {
+  echo "main differs from origin/main; pull or push first" >&2
+  exit 1
+}
+if git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null; then
+  echo "$tag already exists; bump the version in a PR first (mise run bump $plugin <level>)" >&2
+  exit 1
+fi
+state=$(gh run list --branch main --workflow validate.yml --commit "$(git rev-parse HEAD)" --limit 1 --json conclusion --jq '.[0].conclusion // "none"')
+[ "$state" = success ] || {
+  echo "CI on this commit is '$state', not success" >&2
+  exit 1
+}
+
+git tag -s "$tag" -m "$plugin ${tag##*-v}"
+git push origin "$tag"
+echo "pushed $tag; the release workflow publishes it"

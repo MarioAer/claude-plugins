@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="Raise a plugin's version in its plugin.json"
+#USAGE arg "<plugin>" help="Plugin directory under plugins/"
+#USAGE arg "<level>" help="Which part to raise" {
+#USAGE   choices "patch" "minor" "major"
+#USAGE }
+set -euo pipefail
+
+manifest="plugins/${usage_plugin:?}/.claude-plugin/plugin.json"
+[ -f "$manifest" ] || {
+  echo "no such plugin: $usage_plugin" >&2
+  exit 1
+}
+current=$(jq -r .version "$manifest")
+IFS=. read -r major minor patch <<<"$current"
+case "${usage_level:?}" in
+  major) next="$((major + 1)).0.0" ;;
+  minor) next="$major.$((minor + 1)).0" ;;
+  patch) next="$major.$minor.$((patch + 1))" ;;
+esac
+tmp=$(mktemp)
+jq --arg v "$next" '.version = $v' "$manifest" >"$tmp" && mv "$tmp" "$manifest"
+echo "$usage_plugin: $current -> $next"

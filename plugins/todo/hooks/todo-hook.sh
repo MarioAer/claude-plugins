@@ -4,8 +4,8 @@
 # missing interpreter or a crash never shows a hook error in unrelated work.
 input=$(cat)
 case "$input" in
-  *todo:todo*) ;;
-  *) exit 0 ;;
+*todo:todo*) ;;
+*) exit 0 ;;
 esac
 command -v python3 >/dev/null 2>&1 || exit 0
 printf '%s' "$input" | python3 "$(dirname "$0")/todo_hook.py" 2>/dev/null

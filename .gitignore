@@ -1,4 +1,8 @@
 plugins/skim/evals/corpus/
+
 # Written by Claude Code when a plugin is loaded with --plugin-dir (mod type declarations)
 plugins/*/tsconfig.json
 plugins/*/.claude-plugin/types/
+
+# Written when tests import the hooks under python3
+__pycache__/

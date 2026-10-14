@@ -13,7 +13,8 @@ PASS=0
 FAIL=0
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/skim-tests.XXXXXX")" || {
-  echo "cannot create temp dir" >&2; exit 1
+  echo "cannot create temp dir" >&2
+  exit 1
 }
 trap 'rm -rf "$WORK"' EXIT
 
@@ -25,20 +26,20 @@ BINARY="$WORK/blob.bin"
 AT="$WORK/at-threshold.ts"
 OVER="$WORK/over-threshold.ts"
 
-for i in $(seq 1 40); do echo "export const small${i} = ${i};"; done > "$SMALL"
-for i in $(seq 1 1200); do echo "export const big${i} = ${i}; // padding padding padding"; done > "$BIG"
+for i in $(seq 1 40); do echo "export const small${i} = ${i};"; done >"$SMALL"
+for i in $(seq 1 1200); do echo "export const big${i} = ${i}; // padding padding padding"; done >"$BIG"
 # exactly at and one past the 350-line threshold, kept under the byte limit so
 # the line rule is what is being tested
-for i in $(seq 1 350); do echo "const a${i}=${i};"; done > "$AT"
-for i in $(seq 1 351); do echo "const b${i}=${i};"; done > "$OVER"
+for i in $(seq 1 350); do echo "const a${i}=${i};"; done >"$AT"
+for i in $(seq 1 351); do echo "const b${i}=${i};"; done >"$OVER"
 python3 -c "open('$ONELINE','w').write('var x=' + 'a'*60000 + ';')"
 python3 -c "open('$BINARY','wb').write(b'\x7fELF' + bytes(range(256))*40)"
 
 # --- helpers ----------------------------------------------------------------
 # decision <json> -> prints allow|deny
 decision() {
-  printf '%s' "$1" | bash "$GUARD" 2>/dev/null \
-    | python3 -c "
+  printf '%s' "$1" | bash "$GUARD" 2>/dev/null |
+    python3 -c "
 import json,sys
 try:
     d=json.load(sys.stdin)
@@ -51,9 +52,11 @@ print(d.get('hookSpecificOutput',{}).get('permissionDecision','MISSING'))
 check() {
   local name="$1" expected="$2" got="$3"
   if [ "$got" = "$expected" ]; then
-    PASS=$((PASS + 1)); printf '  ok   %s\n' "$name"
+    PASS=$((PASS + 1))
+    printf '  ok   %s\n' "$name"
   else
-    FAIL=$((FAIL + 1)); printf '  FAIL %s (expected %s, got %s)\n' "$name" "$expected" "$got"
+    FAIL=$((FAIL + 1))
+    printf '  FAIL %s (expected %s, got %s)\n' "$name" "$expected" "$got"
   fi
 }
 
@@ -96,32 +99,35 @@ PY
 }
 
 echo "guard fixture suite"
-[ -x "$GUARD" ] || [ -f "$GUARD" ] || { echo "  FAIL guard not found at $GUARD"; exit 1; }
+[ -x "$GUARD" ] || [ -f "$GUARD" ] || {
+  echo "  FAIL guard not found at $GUARD"
+  exit 1
+}
 
 # --- cases ------------------------------------------------------------------
 
 fresh
-check "oversized file denies"            deny  "$(decision "$(read_json "$BIG")")"
+check "oversized file denies" deny "$(decision "$(read_json "$BIG")")"
 
 fresh
-check "small file allows"                allow "$(decision "$(read_json "$SMALL")")"
+check "small file allows" allow "$(decision "$(read_json "$SMALL")")"
 
 fresh
-check "exactly at threshold allows"      allow "$(decision "$(read_json "$AT")")"
+check "exactly at threshold allows" allow "$(decision "$(read_json "$AT")")"
 
 fresh
-check "one line over threshold denies"   deny  "$(decision "$(read_json "$OVER")")"
+check "one line over threshold denies" deny "$(decision "$(read_json "$OVER")")"
 
 fresh
-check "less of oversized denies"         deny  "$(decision "$(bash_json "less $BIG")")"
+check "less of oversized denies" deny "$(decision "$(bash_json "less $BIG")")"
 
 fresh
-check "more of oversized denies"         deny  "$(decision "$(bash_json "more $BIG")")"
+check "more of oversized denies" deny "$(decision "$(bash_json "more $BIG")")"
 
 fresh
 CLAUDE_PLUGIN_OPTION_MIN_LINES=garbage
 export CLAUDE_PLUGIN_OPTION_MIN_LINES
-check "non-numeric threshold falls back" deny  "$(decision "$(read_json "$BIG")")"
+check "non-numeric threshold falls back" deny "$(decision "$(read_json "$BIG")")"
 unset CLAUDE_PLUGIN_OPTION_MIN_LINES
 
 fresh
@@ -129,77 +135,77 @@ check "bounded read under budget allows" allow "$(decision "$(read_json "$BIG" 1
 
 fresh
 decision "$(read_json "$BIG" 300)" >/dev/null
-check "cumulative over budget denies"    deny  "$(decision "$(read_json "$BIG" 300)")"
+check "cumulative over budget denies" deny "$(decision "$(read_json "$BIG" 300)")"
 
 fresh
 decision "$(read_json "$BIG" 100)" >/dev/null
 decision "$(read_json "$BIG" 100)" >/dev/null
 decision "$(read_json "$BIG" 100)" >/dev/null
-check "fourth chunked read denies"       deny  "$(decision "$(read_json "$BIG" 100)")"
+check "fourth chunked read denies" deny "$(decision "$(read_json "$BIG" 100)")"
 
 fresh
-check "plugin-scoped worker allows"      allow "$(decision "$(read_json "$BIG" "" "skim:bulk-reader")")"
+check "plugin-scoped worker allows" allow "$(decision "$(read_json "$BIG" "" "skim:bulk-reader")")"
 
 fresh
-check "bare-name worker allows"          allow "$(decision "$(read_json "$BIG" "" "bulk-reader")")"
+check "bare-name worker allows" allow "$(decision "$(read_json "$BIG" "" "bulk-reader")")"
 
 fresh
-check "unrelated subagent still gated"   deny  "$(decision "$(read_json "$BIG" "" "Explore")")"
+check "unrelated subagent still gated" deny "$(decision "$(read_json "$BIG" "" "Explore")")"
 
 fresh
 decision "$(edit_json "$BIG")" >/dev/null
-check "previously edited path allows"    allow "$(decision "$(read_json "$BIG")")"
+check "previously edited path allows" allow "$(decision "$(read_json "$BIG")")"
 
 fresh
 decision "$(read_json "$BIG")" >/dev/null
-check "second identical read allows"     allow "$(decision "$(read_json "$BIG")")"
+check "second identical read allows" allow "$(decision "$(read_json "$BIG")")"
 
 fresh
-check "one-line oversized bytes denies"  deny  "$(decision "$(read_json "$ONELINE")")"
+check "one-line oversized bytes denies" deny "$(decision "$(read_json "$ONELINE")")"
 
 fresh
-check "binary file allows"               allow "$(decision "$(read_json "$BINARY")")"
+check "binary file allows" allow "$(decision "$(read_json "$BINARY")")"
 
 fresh
-check "cat of oversized denies"          deny  "$(decision "$(bash_json "cat $BIG")")"
+check "cat of oversized denies" deny "$(decision "$(bash_json "cat $BIG")")"
 
 fresh
-check "cat piped to grep allows"         allow "$(decision "$(bash_json "cat $BIG | grep foo")")"
+check "cat piped to grep allows" allow "$(decision "$(bash_json "cat $BIG | grep foo")")"
 
 fresh
-check "head -n 20 allows"                allow "$(decision "$(bash_json "head -n 20 $BIG")")"
+check "head -n 20 allows" allow "$(decision "$(bash_json "head -n 20 $BIG")")"
 
 fresh
-check "head -100 allows"                 allow "$(decision "$(bash_json "head -100 $BIG")")"
+check "head -100 allows" allow "$(decision "$(bash_json "head -100 $BIG")")"
 
 fresh
-check "head -5000 denies"                deny  "$(decision "$(bash_json "head -5000 $BIG")")"
+check "head -5000 denies" deny "$(decision "$(bash_json "head -5000 $BIG")")"
 
 fresh
-check "head -n 5000 denies"              deny  "$(decision "$(bash_json "head -n 5000 $BIG")")"
+check "head -n 5000 denies" deny "$(decision "$(bash_json "head -n 5000 $BIG")")"
 
 fresh
-check "bare head allows (default 10)"    allow "$(decision "$(bash_json "head $BIG")")"
+check "bare head allows (default 10)" allow "$(decision "$(bash_json "head $BIG")")"
 
 fresh
-check "cat -n of oversized denies"       deny  "$(decision "$(bash_json "cat -n $BIG")")"
+check "cat -n of oversized denies" deny "$(decision "$(bash_json "cat -n $BIG")")"
 
 fresh
-check "quoted path denies"               deny  "$(decision "$(bash_json "cat \"$BIG\"")")"
+check "quoted path denies" deny "$(decision "$(bash_json "cat \"$BIG\"")")"
 
 fresh
-check "grep is not a bulk reader"        allow "$(decision "$(bash_json "grep -n export $BIG")")"
+check "grep is not a bulk reader" allow "$(decision "$(bash_json "grep -n export $BIG")")"
 
 fresh
-check "nonexistent file allows"          allow "$(decision "$(read_json "$WORK/nope.ts")")"
+check "nonexistent file allows" allow "$(decision "$(read_json "$WORK/nope.ts")")"
 
 fresh
-check "malformed stdin allows"           allow "$(decision 'not json at all')"
+check "malformed stdin allows" allow "$(decision 'not json at all')"
 
 fresh
 CLAUDE_PLUGIN_DATA=/proc/nonexistent-cannot-write
 export CLAUDE_PLUGIN_DATA
-check "unwritable state dir allows"      allow "$(decision "$(read_json "$BIG")")"
+check "unwritable state dir allows" allow "$(decision "$(read_json "$BIG")")"
 
 # --- summary ----------------------------------------------------------------
 echo
