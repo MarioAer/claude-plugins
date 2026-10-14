@@ -1,0 +1,12 @@
+{
+  "name": "todo",
+  "version": "0.5.0",
+  "description": "Capture deferred tasks mid-session into an untracked project todo list without interrupting the current task.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "Mario Erazo"
+  },
+  "repository": "https://github.com/MarioAer/claude-plugins",
+  "license": "MIT",
+  "keywords": ["todo", "deferred-tasks"]
+}
