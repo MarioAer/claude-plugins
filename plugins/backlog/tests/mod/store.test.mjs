@@ -1,0 +1,186 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { normalize, modeOf, openItems, stripMeta, numbered, HEADER, META } from '../../hooks/store.js'
+
+test('normalize replaces CR and LF with spaces and trims', () => {
+  assert.equal(normalize('  a\r\nb\nc  '), 'a  b c')
+  assert.equal(normalize(''), '')
+})
+
+test('modeOf selects list, review, empty and add; prefixes are add', () => {
+  assert.equal(modeOf('list'), 'list')
+  assert.equal(modeOf('LIST'), 'list')
+  assert.equal(modeOf('Review'), 'review')
+  assert.equal(modeOf(''), 'empty')
+  assert.equal(modeOf('review the auth retry logic'), 'add')
+  assert.equal(modeOf('x'), 'add')
+})
+
+test('openItems returns open lines without the prefix', () => {
+  const content = `${HEADER}- [ ] alpha (2026-01-01, branch: main)\n- [x] gone (2026-01-01)\n- [ ] beta (2026-01-02)\n`
+  assert.deepEqual(openItems(content), ['alpha (2026-01-01, branch: main)', 'beta (2026-01-02)'])
+  assert.deepEqual(openItems(''), [])
+})
+
+test('stripMeta removes the trailing metadata only', () => {
+  assert.equal(stripMeta('fix login (2026-10-01, branch: main, by: claude)'), 'fix login')
+  assert.equal(stripMeta('ends with (parens) (2026-10-01)'), 'ends with (parens)')
+  assert.equal(stripMeta('no meta'), 'no meta')
+  assert.ok(META.test(' (2026-10-01, branch: feat/x)'))
+})
+
+test('numbered formats from 1', () => {
+  assert.equal(numbered(['a', 'b']), '1. a\n2. b')
+})
+
+import { mkdtemp, mkdir, writeFile, symlink, realpath } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { locate, rootRefused, checkLinks, list, Refused } from '../../hooks/store.js'
+import { nodeIo } from './node-io.mjs'
+
+async function scratch() { return realpath(await mkdtemp(join(tmpdir(), 'backlog-mod-'))) }
+function gitInit(dir) { execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'main']) }
+
+test('locate: git root and unborn branch from a subdirectory', async () => {
+  const dir = await scratch(); gitInit(dir); await mkdir(join(dir, 'src/sub'), { recursive: true })
+  assert.deepEqual(await locate(nodeIo(), join(dir, 'src/sub')), { root: dir, branch: 'main' })
+})
+
+test('locate: non-git directory is its own root without a branch', async () => {
+  const dir = await scratch()
+  assert.deepEqual(await locate(nodeIo(), dir), { root: dir, branch: null })
+})
+
+test('locate: detached HEAD has no branch', async () => {
+  const dir = await scratch(); gitInit(dir)
+  execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'init'])
+  execFileSync('git', ['-C', dir, 'checkout', '-q', '--detach'])
+  assert.equal((await locate(nodeIo(), dir)).branch, null)
+})
+
+test('rootRefused for .git and .claude components only', () => {
+  assert.equal(rootRefused('/a/.git/hooks'), true)
+  assert.equal(rootRefused('/a/.claude'), true)
+  assert.equal(rootRefused('/a/my.claude.repo'), false)
+})
+
+test('checkLinks refuses a symlinked folder or file with the Python wording', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog'))
+  await writeFile(join(dir, 'outside.md'), 'x')
+  await symlink(join(dir, 'outside.md'), join(dir, '.backlog/backlog.md'))
+  await assert.rejects(checkLinks(nodeIo(), join(dir, '.backlog')), (e) => e instanceof Refused && e.message === `${dir}/.backlog/backlog.md is a symlink`)
+})
+
+test('list: items, empty file, missing file', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog'))
+  await writeFile(join(dir, '.backlog/backlog.md'), '# Backlog\n\n- [ ] alpha (2026-01-01)\n- [x] gone (2026-01-01)\n')
+  assert.deepEqual(await list(nodeIo(), dir), ['alpha (2026-01-01)'])
+  const empty = await scratch()
+  assert.deepEqual(await list(nodeIo(), empty), [])
+})
+
+import { readFile, utimes, rmdir, access } from 'node:fs/promises'
+import { add, HEADER as H, DATA_NOTE, MAX_LEN } from '../../hooks/store.js'
+
+const io = () => nodeIo({ today: '2026-01-01' })
+const read = (dir) => readFile(join(dir, '.backlog/backlog.md'), 'utf8')
+
+test('add: first add creates folder, .gitignore, header and the line', async () => {
+  const dir = await scratch()
+  const marker = await add(io(), { root: dir, branch: 'main', text: 'add tests', byClaude: false })
+  assert.equal(marker, `BACKLOG_ADDED: add tests\n${DATA_NOTE}`)
+  assert.equal(await readFile(join(dir, '.backlog/.gitignore'), 'utf8'), '*\n')
+  assert.equal(await read(dir), `${H}- [ ] add tests (2026-01-01, branch: main)\n`)
+  await assert.rejects(access(join(dir, '.backlog/.lock')))
+})
+
+test('add: by claude, no branch, appends after a missing trailing newline', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog'))
+  await writeFile(join(dir, '.backlog/backlog.md'), '# Backlog\n\n- [ ] old (2026-01-01)')
+  await add(io(), { root: dir, branch: null, text: 'new', byClaude: true })
+  assert.equal(await read(dir), '# Backlog\n\n- [ ] old (2026-01-01)\n- [ ] new (2026-01-01, by: claude)\n')
+})
+
+test('add: duplicate ignoring case and metadata writes nothing', async () => {
+  const dir = await scratch()
+  await add(io(), { root: dir, branch: 'main', text: 'Dedupe Me', byClaude: false })
+  const before = await read(dir)
+  assert.equal(await add(io(), { root: dir, branch: 'main', text: 'dedupe me', byClaude: true }), `BACKLOG_DUPLICATE: dedupe me\n${DATA_NOTE}`)
+  assert.equal(await read(dir), before)
+})
+
+test('add: text over 2000 characters is refused', async () => {
+  const dir = await scratch()
+  await assert.rejects(add(io(), { root: dir, branch: null, text: 'x'.repeat(MAX_LEN + 1), byClaude: false }),
+    (e) => e instanceof Refused && e.message === `the item is longer than ${MAX_LEN} characters`)
+})
+
+test('add: shell characters are stored literally', async () => {
+  const dir = await scratch()
+  await add(io(), { root: dir, branch: null, text: '$(rm -rf /) `x` "q" \'s\' Ünïcode', byClaude: false })
+  assert.match(await read(dir), /- \[ \] \$\(rm -rf \/\) `x` "q" 's' Ünïcode \(2026-01-01\)\n$/)
+})
+
+test('add: a held lock makes it wait, then refuse with the Python wording', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog/.lock'), { recursive: true })
+  const started = Date.now()
+  await assert.rejects(add(io(), { root: dir, branch: null, text: 'x', byClaude: false }),
+    (e) => e instanceof Refused && e.message === 'the backlog is locked by another session')
+  assert.ok(Date.now() - started >= 900, 'waited about 20 x 50 ms')
+  await rmdir(join(dir, '.backlog/.lock'))
+})
+
+test('add: a stale lock older than 10 s is removed', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog/.lock'), { recursive: true })
+  const old = (Date.now() - 60000) / 1000
+  await utimes(join(dir, '.backlog/.lock'), old, old)
+  await add(io(), { root: dir, branch: null, text: 'x', byClaude: false })
+  assert.match(await read(dir), /- \[ \] x \(2026-01-01\)\n$/)
+})
+
+test('add: two parallel adds produce two intact lines', async () => {
+  const dir = await scratch()
+  await Promise.all([
+    add(io(), { root: dir, branch: null, text: 'one', byClaude: false }),
+    add(io(), { root: dir, branch: null, text: 'two', byClaude: false }),
+  ])
+  const lines = (await read(dir)).split('\n').filter((l) => l.startsWith('- [ ] ')).sort()
+  assert.deepEqual(lines, ['- [ ] one (2026-01-01)', '- [ ] two (2026-01-01)'])
+})
+
+import { markDone, addNote } from '../../hooks/store.js'
+
+const SAMPLE = '# Backlog\n\n- [ ] alpha (2026-01-01, branch: main)\n  - 2026-01-02: earlier note\n- [ ] beta (2026-01-02)\n'
+
+async function sampleDir() {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog'))
+  await writeFile(join(dir, '.backlog/backlog.md'), SAMPLE)
+  return dir
+}
+
+test('markDone flips the box of that line only', async () => {
+  const dir = await sampleDir()
+  assert.equal(await markDone(io(), dir, 'beta (2026-01-02)'), true)
+  assert.equal(await read(dir), SAMPLE.replace('- [ ] beta', '- [x] beta'))
+})
+
+test('addNote inserts after existing sub-bullets with today\'s date', async () => {
+  const dir = await sampleDir()
+  assert.equal(await addNote(io(), dir, 'alpha (2026-01-01, branch: main)', 'blocked by\nAPI change'), true)
+  assert.equal(await read(dir), SAMPLE.replace('earlier note\n', 'earlier note\n  - 2026-01-01: blocked by API change\n'))
+})
+
+test('markDone on a vanished line writes nothing and returns false', async () => {
+  const dir = await sampleDir()
+  assert.equal(await markDone(io(), dir, 'gamma (2026-01-03)'), false)
+  assert.equal(await read(dir), SAMPLE)
+})
+
+test('edits refuse a symlinked file', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.backlog'))
+  await writeFile(join(dir, 'outside.md'), SAMPLE)
+  await symlink(join(dir, 'outside.md'), join(dir, '.backlog/backlog.md'))
+  await assert.rejects(markDone(io(), dir, 'beta (2026-01-02)'), Refused)
+})

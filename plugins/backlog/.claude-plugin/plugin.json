@@ -1,7 +1,8 @@
 {
   "name": "backlog",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Capture deferred tasks mid-session into an untracked project backlog without interrupting the current task.",
+  "types": "./types/index.d.ts",
   "author": {
     "name": "Mario Erazo"
   },
