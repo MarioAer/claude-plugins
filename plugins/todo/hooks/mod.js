@@ -17,7 +17,7 @@ export function resetCapture() { capture = null }
 
 // What the band and the pane draw from. Written only from events, never while drawing.
 const BAND_MS = 10000
-const EMPTY_VIEW = { root: null, items: [], order: [], bandUntil: 0, pane: null }
+const EMPTY_VIEW = { root: null, items: [], order: [], notes: {}, bandUntil: 0, pane: null }
 
 async function getView($) {
   const { value } = await $.state.get({ plugin: 'todo', key: 'view' })
@@ -49,15 +49,19 @@ export function colorOf(tag, order) {
   return store.PALETTE[index % store.PALETTE.length]
 }
 
-// The view's items (display order) and tag order from a fresh read.
+// The view's items (display order), tag order and notes from a fresh read.
 async function loadView(io, root) {
-  const { items, order } = await store.listWithOrder(io, root)
-  return { items: arrange(items, order).flatMap((g) => g.items), order }
+  const { items, order, notes } = await store.listWithOrder(io, root)
+  return { items: arrange(items, order).flatMap((g) => g.items), order, notes }
+}
+
+export function summary(pane) {
+  return `Review: ${pane.done} done, ${pane.notes} notes, ${pane.retagged} retagged`
 }
 
 // Refreshes the open items and shows the band for BAND_MS; a timer redraws once it lapses.
 async function showBand($, root) {
-  let loaded = { items: [], order: [] }
+  let loaded = { items: [], order: [], notes: {} }
   try { loaded = await loadView(modsIo($), root) } catch { /* the refusal was already reported */ }
   // An open pane keeps its cursor, clamped to the fresh list; an emptied list ends the review.
   const before = await getView($)
@@ -65,7 +69,7 @@ async function showBand($, root) {
   await setView($, (current) => ({ ...current, root, ...loaded, bandUntil: Date.now() + BAND_MS, pane }))
   if (before.pane !== null && pane === null) {
     await $.ui.close({ id: PANE })
-    $.ui.toast(`Review done: ${before.pane.done} done, ${before.pane.skipped} skipped, ${before.pane.notes} notes`)
+    $.ui.toast(summary(before.pane))
   }
   $.ui.invalidate('ui.render')
   $.clock.after(BAND_MS + 100, () => $.ui.invalidate('ui.render'))
@@ -83,29 +87,42 @@ async function renderBand($, e, next) {
 }
 
 const PANE = 'todo-review'
+// List rows (headings and items) drawn around the cursor; the rest are counted above and below.
+const WINDOW = 10
+// Below this many columns the detail card goes first and shows only the latest note.
+const NARROW = 60
 
 async function openPane($, root) {
   const loaded = await loadView(modsIo($), root)
-  await setView($, (view) => ({ ...view, root, ...loaded, pane: { index: 0, noteFor: null, tagsFor: null, draft: null, done: 0, skipped: 0, notes: 0 } }))
+  const pane = { index: 0, noteFor: null, tagsFor: null, draft: null, lastDone: null, done: 0, notes: 0, retagged: 0 }
+  await setView($, (view) => ({ ...view, root, ...loaded, pane }))
   await $.ui.open({ id: PANE, title: 'Todo review', focus: true, closeOnEscape: true })
 }
 
-// After an action: re-read the items, count it, move on. removed means the current line left the
-// open list (done, or vanished), so the cursor stays; otherwise it steps forward.
-async function advance($, counter, removed) {
+// Re-reads the list after an action and keeps the cursor on `keep` at its new position, else
+// clamps the old index, so a done item hands the cursor to the one below it. `counts` merges into
+// the pane. An emptied list ends the review.
+async function refreshPane($, keep, counts = {}) {
   const view = await getView($)
   if (view.pane === null) return
-  let loaded = { items: view.items, order: view.order }
+  let loaded = { items: view.items, order: view.order, notes: view.notes }
   try { loaded = await loadView(modsIo($), view.root) } catch { /* keep what was shown */ }
-  const items = loaded.items
-  const pane = { ...view.pane, noteFor: null, tagsFor: null, draft: null, [counter]: view.pane[counter] + 1, index: view.pane.index + (removed ? 0 : 1) }
-  if (pane.index >= items.length) {
+  const pane = { ...view.pane, ...counts, noteFor: null, tagsFor: null, draft: null }
+  if (loaded.items.length === 0) {
     await setView($, (v) => ({ ...v, ...loaded, pane: null }))
     await $.ui.close({ id: PANE })
-    $.ui.toast(`Review done: ${pane.done} done, ${pane.skipped} skipped, ${pane.notes} notes`)
+    $.ui.toast(summary(pane))
     return
   }
-  await setView($, (v) => ({ ...v, ...loaded, pane }))
+  const found = keep === null ? -1 : loaded.items.indexOf(keep)
+  const index = found >= 0 ? found : Math.min(view.pane.index, loaded.items.length - 1)
+  await setView($, (v) => ({ ...v, ...loaded, pane: { ...pane, index } }))
+}
+
+// j, k, g and e: the new index from the old one and the list length, clamped, never wrapping.
+async function move($, to) {
+  await setView($, (v) => v.pane === null || v.items.length === 0 ? v
+    : { ...v, pane: { ...v.pane, index: Math.max(0, Math.min(v.items.length - 1, to(v.pane.index, v.items.length))) } })
 }
 
 async function doneAction($) {
@@ -115,14 +132,34 @@ async function doneAction($) {
   try {
     const ok = await store.markDone(modsIo($), view.root, item)
     $.ui.toast(ok ? `Done: ${store.stripMeta(item)}` : `Todo item changed on disk: ${store.stripMeta(item)}`)
-    await advance($, ok ? 'done' : 'skipped', true)
+    await refreshPane($, null, ok ? { done: view.pane.done + 1, lastDone: item } : {})
   } catch (error) {
     if (!(error instanceof store.Refused)) throw error
     $.ui.toast(`Todo failed: ${error.message}`)
-    await advance($, 'skipped', false)
+    await refreshPane($, item)
   }
 }
 
+// Reopens the item last marked done in this review and puts the cursor back on it.
+async function undoAction($) {
+  const view = await getView($)
+  if (view.pane === null) return
+  const item = view.pane.lastDone
+  if (item === null) {
+    $.ui.toast('Nothing to undo')
+    return
+  }
+  try {
+    const ok = await store.markUndone(modsIo($), view.root, item)
+    $.ui.toast(ok ? `Reopened: ${store.stripMeta(item)}` : `Todo item changed on disk: ${store.stripMeta(item)}`)
+    await refreshPane($, ok ? item : null, ok ? { done: view.pane.done - 1, lastDone: null } : { lastDone: null })
+  } catch (error) {
+    if (!(error instanceof store.Refused)) throw error
+    $.ui.toast(`Todo failed: ${error.message}`)
+  }
+}
+
+// A saved note stays on its item, so the card shows it at once.
 async function noteAction($, value) {
   const view = await getView($)
   if (view.pane === null || view.pane.noteFor === null) return
@@ -135,29 +172,12 @@ async function noteAction($, value) {
   try {
     const ok = await store.addNote(modsIo($), view.root, item, note)
     $.ui.toast(ok ? `Noted: ${store.stripMeta(item)}` : `Todo item changed on disk: ${store.stripMeta(item)}`)
-    await advance($, ok ? 'notes' : 'skipped', !ok)
+    await refreshPane($, ok ? item : null, ok ? { notes: view.pane.notes + 1 } : {})
   } catch (error) {
     if (!(error instanceof store.Refused)) throw error
     $.ui.toast(`Todo failed: ${error.message}`)
-    await advance($, 'skipped', false)
+    await refreshPane($, item)
   }
-}
-
-// Re-reads the list and keeps the cursor on `keep` at its new position, else clamps the old index.
-async function refreshPane($, keep) {
-  const view = await getView($)
-  if (view.pane === null) return
-  let loaded = { items: view.items, order: view.order }
-  try { loaded = await loadView(modsIo($), view.root) } catch { /* keep what was shown */ }
-  if (loaded.items.length === 0) {
-    await setView($, (v) => ({ ...v, ...loaded, pane: null }))
-    await $.ui.close({ id: PANE })
-    $.ui.toast(`Review done: ${view.pane.done} done, ${view.pane.skipped} skipped, ${view.pane.notes} notes`)
-    return
-  }
-  const found = keep === null ? -1 : loaded.items.indexOf(keep)
-  const index = found >= 0 ? found : Math.min(view.pane.index, loaded.items.length - 1)
-  await setView($, (v) => ({ ...v, ...loaded, pane: { ...v.pane, noteFor: null, tagsFor: null, draft: null, index } }))
 }
 
 // The text typed into the note or tags field so far. A redraw re-applies an Input's value, and the
@@ -180,7 +200,7 @@ async function tagsAction($, value) {
       return
     }
     $.ui.toast(`Tagged: ${store.stripMeta(item)}`)
-    await refreshPane($, updated)
+    await refreshPane($, updated, { retagged: view.pane.retagged + 1 })
   } catch (error) {
     if (!(error instanceof store.Refused)) throw error
     $.ui.toast(`Todo failed: ${error.message}`)
@@ -188,57 +208,133 @@ async function tagsAction($, value) {
   }
 }
 
+// The date and branch of an item's metadata, for the detail card.
+export function itemMeta(item) {
+  const match = store.META.exec(item)
+  if (!match) return { date: null, branch: null }
+  return { date: match[0].slice(2, 12), branch: match[1] ? match[1].slice(', branch: '.length) : null }
+}
+
+// List entries in display order, headings included, and the cursor's entry. Exported for tests.
+export function listEntries(items, order) {
+  const entries = []
+  let position = 0
+  for (const group of arrange(items, order)) {
+    entries.push({ heading: group.tag })
+    for (const item of group.items) entries.push({ item, index: position++ })
+  }
+  return entries
+}
+
+// The slice of entries drawn around the cursor's entry, and how many items are left out each side.
+export function windowOf(entries, cursor, size = WINDOW) {
+  const at = entries.findIndex((entry) => entry.index === cursor)
+  const start = Math.max(0, Math.min(at - Math.floor(size / 2), entries.length - size))
+  const end = Math.min(entries.length, start + size)
+  const count = (list) => list.filter((entry) => entry.item !== undefined).length
+  return { shown: entries.slice(start, end), above: count(entries.slice(0, start)), below: count(entries.slice(end)) }
+}
+
 async function renderPane($, e, next) {
   const view = await getView($)
   const pane = view.pane
   if (pane === null) return next(e)
   const { Box, Text, Button, Input } = $.ui.resolve(e)
-  const groups = arrange(view.items, view.order)
-  const rows = []
-  let position = 0
-  for (const group of groups) {
-    rows.push(group.tag === null
-      ? Text({ bold: true, dimColor: true, children: 'untagged' })
-      : Text({ bold: true, color: colorOf(group.tag, view.order), children: `#${group.tag}` }))
-    for (const item of group.items) {
-      const index = position++
-      rows.push(Box({ gap: 1, children: [
-        Text({ bold: index === pane.index, dimColor: index < pane.index, wrap: 'truncate', children: `${index + 1}. ${store.withoutTagsField(item)}` }),
-        ...store.itemTags(item).map((tag) => Text({ color: colorOf(tag, view.order), children: `#${tag}` })),
-      ] }))
+  const focused = e.props?.isFocused === true
+  const narrow = (e.props?.bodyColumns ?? NARROW) < NARROW
+  const total = view.items.length
+  const current = view.items[pane.index]
+  const chips = (item) => store.itemTags(item).map((tag) => Text({ color: colorOf(tag, view.order), children: `#${tag}` }))
+
+  // The list: a header with the focus badge, then the rows around the cursor.
+  const { shown, above, below } = windowOf(listEntries(view.items, view.order), pane.index)
+  const rows = shown.map((entry) => {
+    if (entry.item === undefined) {
+      return entry.heading === null
+        ? Text({ bold: true, dimColor: true, children: 'untagged' })
+        : Text({ bold: true, color: colorOf(entry.heading, view.order), children: `#${entry.heading}` })
     }
-  }
+    const isCursor = entry.index === pane.index
+    const mark = isCursor ? (focused ? '▶' : '▷') : ' '
+    return Box({ gap: 1, children: [
+      Text({ bold: isCursor, inverse: isCursor && focused, wrap: 'truncate', children: `${mark} ${entry.index + 1}. ${store.stripMeta(entry.item)}` }),
+      ...chips(entry.item),
+    ] })
+  })
+  const list = Box({ flexDirection: 'column', borderStyle: 'single', paddingX: 1, ...(focused ? { borderColor: 'cyan' } : { borderDimColor: true }), children: [
+    Box({ gap: 2, children: [
+      Text({ bold: true, children: `Todo · ${total} open · ${pane.done} done · ${pane.index + 1}/${total}` }),
+      focused ? Text({ color: 'green', children: '● keys active' }) : Text({ dimColor: true, children: '○ not focused' }),
+    ] }),
+    ...(above > 0 ? [Text({ dimColor: true, children: `▲ ${above} more` })] : []),
+    ...rows,
+    ...(below > 0 ? [Text({ dimColor: true, children: `▼ ${below} more` })] : []),
+  ] })
+
+  // The card: everything about the cursor's item, its notes included.
+  const { date, branch } = itemMeta(current)
+  const notes = view.notes?.[current] ?? []
+  const noteLine = (note) => Text({ wrap: 'wrap', children: `· ${note.date ? note.date.slice(5) : '     '}  ${note.text}` })
+  const noteRows = notes.length === 0
+    ? [Text({ dimColor: true, children: 'No notes yet. n adds one.' })]
+    : narrow
+      ? [noteLine(notes.at(-1)), ...(notes.length > 1 ? [Text({ dimColor: true, children: `+${notes.length - 1} earlier` })] : [])]
+      : notes.map(noteLine)
+  const card = Box({ flexDirection: 'column', borderStyle: 'round', paddingX: 1, ...(focused ? {} : { borderDimColor: true }), children: [
+    Text({ bold: true, wrap: 'wrap', children: store.stripMeta(current) }),
+    Text({ dimColor: true, children: [date && `added ${date}`, branch && `branch ${branch}`].filter(Boolean).join(' · ') || 'no metadata' }),
+    ...(store.itemTags(current).length > 0 ? [Box({ gap: 1, children: chips(current) })] : []),
+    Text({ bold: true, children: `Notes (${notes.length})` }),
+    ...noteRows,
+  ] })
+
   // Plain buttons draw as "d: done", the shape of Claude Code's own survey rows, so each key is visible.
   const noting = pane.noteFor !== null
   const tagging = !noting && pane.tagsFor !== null
   let controls
+  let help
   if (noting) {
-    controls = [Input({ key: 'note', label: 'Note', placeholder: 'empty cancels', value: pane.draft ?? '', autoFocus: true, onInput: (value) => setDraft($, value), onSubmit: (value) => noteAction($, value) })]
+    controls = [Input({ key: 'note', label: 'Note', placeholder: 'empty cancels', value: pane.draft ?? '', submitLabel: 'save', autoFocus: true, onInput: (value) => setDraft($, value), onSubmit: (value) => noteAction($, value) })]
+    help = 'Enter saves the note, empty Enter cancels, Esc returns to the prompt.'
   } else if (tagging) {
-    controls = [Input({ key: 'tags', label: 'Tags', value: pane.draft ?? '', placeholder: 'space separated, empty clears', autoFocus: true, onInput: (value) => setDraft($, value), onSubmit: (value) => tagsAction($, value) })]
-  } else {
     controls = [
-      Button({ key: 'done', label: 'done', hotkey: 'd', plain: true, onPress: () => doneAction($) }),
-      Button({ key: 'skip', label: 'skip', hotkey: 's', plain: true, onPress: () => advance($, 'skipped', false) }),
-      Button({ key: 'note', label: 'note', hotkey: 'n', plain: true, onPress: () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: v.items[v.pane.index] ?? null, draft: '' } })) }),
-      Button({ key: 'tags', label: 'tags', hotkey: 't', plain: true, onPress: () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, tagsFor: v.items[v.pane.index] ?? null, draft: store.itemTags(v.items[v.pane.index] ?? '').join(' ') } })) }),
-      Button({ key: 'close', label: 'close', hotkey: 'q', plain: true, onPress: () => $.ui.close({ id: PANE }) }),
+      Input({ key: 'tags', label: 'Tags', value: pane.draft ?? '', placeholder: 'space separated, empty clears', submitLabel: 'save', autoFocus: true, onInput: (value) => setDraft($, value), onSubmit: (value) => tagsAction($, value) }),
+      Text({ dimColor: true, wrap: 'wrap', children: view.order.length > 0 ? `known: ${view.order.map((tag) => `#${tag}`).join(' ')}` : 'no tags yet' }),
     ]
+    help = 'Enter replaces the tags, empty Enter clears them, Esc returns to the prompt.'
+  } else {
+    const key = (name, label, hotkey, onPress, dim = false) => Button({ key: name, label, hotkey, plain: true, ...(dim || !focused ? { dimColor: true } : {}), onPress })
+    controls = [
+      Box({ columnGap: 2, flexWrap: 'wrap', children: [
+        key('down', 'down', 'j', () => move($, (i) => i + 1)),
+        key('up', 'up', 'k', () => move($, (i) => i - 1)),
+        key('top', 'top', 'g', () => move($, () => 0)),
+        key('end', 'end', 'e', () => move($, (_, n) => n - 1)),
+      ] }),
+      Box({ columnGap: 2, flexWrap: 'wrap', children: [
+        key('done', 'done', 'd', () => doneAction($)),
+        key('undo', 'undo', 'u', () => undoAction($), pane.lastDone === null),
+        key('note', 'note', 'n', () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: v.items[v.pane.index] ?? null, draft: '' } }))),
+        key('tags', 'tags', 't', () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, tagsFor: v.items[v.pane.index] ?? null, draft: store.itemTags(v.items[v.pane.index] ?? '').join(' ') } }))),
+        key('close', 'close', 'q', () => $.ui.close({ id: PANE })),
+      ] }),
+    ]
+    help = focused
+      ? 'Tab moves between keys, Enter presses, Esc returns to the prompt.'
+      : 'ctrl+x tab to focus · keys go to the prompt'
   }
-  const help = noting
-    ? 'Enter saves the note, empty Enter cancels, Esc returns to the prompt.'
-    : tagging
-      ? 'Enter replaces the tags, empty Enter clears them, Esc returns to the prompt.'
-      : 'Keys: d done, s skip, n note, t tags, q close. Tab moves, Enter presses, Esc returns to the prompt.'
   return Box({ flexDirection: 'column', gap: 1, children: [
-    Box({ flexDirection: 'column', children: rows }),
-    Box({ gap: 2, children: controls }),
+    ...(narrow ? [card, list] : [list, card]),
+    Box({ flexDirection: 'column', children: controls }),
     Text({ dimColor: true, wrap: 'wrap', children: help }),
   ] })
 }
 
+// Closing by q, Esc or ctrl+x x ends the review with its summary.
 async function closePane($, e, next) {
-  await setView($, (view) => ({ ...view, pane: null }))
+  const view = await getView($)
+  if (view.pane !== null) $.ui.toast(summary(view.pane))
+  await setView($, (v) => ({ ...v, pane: null }))
   return next(e)
 }
 
