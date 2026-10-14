@@ -4,12 +4,20 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Claude Code CLI installed in CI for 'claude plugin validate --strict'",
+      "description": "mise version pinned for jdx/mise-action in workflows",
       "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
-      "matchStrings": [
-        "npm install -g (?<depName>@anthropic-ai/claude-code)@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
-      ],
-      "datasourceTemplate": "npm"
+      "matchStrings": ["uses: jdx/mise-action@\\S+.*\\n\\s+with:\\n\\s+version: (?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "jdx/mise",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "python stays at the oldest version the hooks support (macOS ships 3.9); raise it by hand",
+      "matchManagers": ["mise"],
+      "matchDepNames": ["python"],
+      "enabled": false
     }
   ]
 }

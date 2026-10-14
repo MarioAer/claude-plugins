@@ -12,17 +12,15 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      # Install exactly what mise.lock records, checksums included.
+      MISE_LOCKED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: ShellCheck
-        run: |
-          command -v shellcheck >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
-          find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck
-      - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code@2.1.293
-      - name: Structural tests
-        run: bash tests/validate.sh
-      - name: Unit tests
-        run: bash tests/unit.sh
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+        with:
+          version: 2026.10.9
+      - name: Lint, structural and unit tests
+        run: mise run check

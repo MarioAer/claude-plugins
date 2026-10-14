@@ -40,15 +40,28 @@ plugins/<name>/tests/e2e.sh       behavioral scenarios that call the Claude API;
 plugins/<name>/docs/              reference docs for that plugin (where present)
 plugins/<name>/evals/             benchmark harness for that plugin (where present)
 tests/                            repository-wide checks
+mise.toml, mise.lock, .mise/tasks dev tools and tasks (see Development)
 ```
 
 ## Development
 
-| Command | Purpose |
+Tools and tasks come from [mise](https://mise.jdx.dev). Once per clone:
+
+```
+mise run setup    # installs the pinned tools (mise.lock) and a git pre-commit hook running lint + validate
+```
+
+| Task | Purpose |
 |---|---|
-| `bash tests/validate.sh` | Structural tests over the marketplace and every plugin: manifests, names, frontmatter, hooks, README, licenses, `claude plugin validate --strict`. Runs in CI. |
-| `bash tests/unit.sh` | Runs every `plugins/<name>/tests/run.sh`. Runs in CI, after ShellCheck over all shell scripts. |
-| `plugins/<name>/tests/e2e.sh` | Headless behavioral scenarios for one plugin (where present). Calls the Claude API; not run in CI. |
+| `mise run check` | Everything CI runs: `lint`, `validate` and `test`. |
+| `mise run lint` | ShellCheck and an shfmt check over every shell script (`mise run fmt` rewrites them; style in `.editorconfig`). |
+| `mise run validate` | `tests/validate.sh`: structural tests over the marketplace and every plugin: manifests, names, frontmatter, hooks, README, licenses, `claude plugin validate --strict`. |
+| `mise run test` | `tests/unit.sh`: runs every `plugins/<name>/tests/run.sh`. |
+| `mise run test:e2e <plugin> [scenario…]` | Headless behavioral scenarios for one plugin (where present). Calls the Claude API; not run in CI. |
+| `mise run bump <plugin> <patch\|minor\|major>` | Raises the plugin's `version`. |
+| `mise run release <plugin>` | Tags the plugin's current version on `main` (see Releasing). |
+
+Python is pinned to 3.9, the oldest `python3` the hooks support, so tests catch syntax only newer versions accept. `claude` and `gh` are pinned only inside the tasks that need them, so your own installs are never shadowed. Renovate keeps the pins and `mise.lock` current.
 
 Load a working copy without installing: `claude --plugin-dir ./plugins/<name>`.
 
@@ -58,13 +71,9 @@ Adding a plugin: create `plugins/<name>/` with `.claude-plugin/plugin.json`, `RE
 
 A plugin's `version` in `plugin.json` pins installed users to that version: they receive changes only after it is raised. For every change that users should receive:
 
-1. Raise `version` in `plugins/<plugin>/.claude-plugin/plugin.json` in the same pull request.
-2. After the squash merge, tag the merge commit and publish a release with notes generated from the merged pull requests:
-
-```
-git tag -s <plugin>-v<version> -m "<plugin> <version>" && git push origin <plugin>-v<version>
-gh release create <plugin>-v<version> --generate-notes --title "<plugin> <version>"
-```
+1. Raise the version in the same pull request: `mise run bump <plugin> <level>`.
+2. After the squash merge, on an up-to-date `main`: `mise run release <plugin>`. It refuses unless the tree is clean, `main` matches `origin/main`, CI passed on that commit and the tag is new, then pushes a signed `<plugin>-v<version>` tag.
+3. The `release` workflow checks the tag against `plugin.json` and `main`, runs `mise run check`, and publishes the GitHub release with notes generated since the plugin's previous tag.
 
 Each plugin is versioned and released independently.
 

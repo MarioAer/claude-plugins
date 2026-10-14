@@ -1,0 +1,48 @@
+name: release
+
+# Publishes a GitHub release for a pushed <plugin>-v<version> tag (see `mise run release`).
+on:
+  push:
+    tags: ["*-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      MISE_LOCKED: "1"
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the tag against main and plugin.json
+        run: |
+          plugin=${TAG%-v*}
+          version=${TAG##*-v}
+          manifest="plugins/$plugin/.claude-plugin/plugin.json"
+          [ -f "$manifest" ] || { echo "::error::no plugin named $plugin"; exit 1; }
+          stated=$(jq -r .version "$manifest")
+          [ "$stated" = "$version" ] || { echo "::error::$TAG does not match $manifest version $stated"; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$TAG is not on main"; exit 1; }
+          echo "PLUGIN=$plugin" >>"$GITHUB_ENV"
+          echo "VERSION=$version" >>"$GITHUB_ENV"
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+        with:
+          version: 2026.10.9
+      - name: Lint, structural and unit tests
+        run: mise run check
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous=$(git describe --tags --abbrev=0 --match "$PLUGIN-v*" "$GITHUB_SHA^" 2>/dev/null || true)
+          args=(--title "$PLUGIN $VERSION" --generate-notes --verify-tag)
+          [ -n "$previous" ] && args+=(--notes-start-tag "$previous")
+          gh release create "$TAG" "${args[@]}"
