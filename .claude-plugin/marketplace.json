@@ -6,9 +6,9 @@
   },
   "plugins": [
     {
-      "name": "backlog",
-      "source": "./plugins/backlog",
-      "description": "Capture deferred tasks mid-session into an untracked project backlog without interrupting the current task.",
+      "name": "todo",
+      "source": "./plugins/todo",
+      "description": "Capture deferred tasks mid-session into an untracked project todo list without interrupting the current task.",
       "category": "productivity"
     },
     {

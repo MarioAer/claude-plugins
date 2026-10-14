@@ -4,7 +4,7 @@ A Claude Code plugin marketplace (`marioaer-plugins`) hosting several plugins. E
 
 | Plugin | Description | License |
 |---|---|---|
-| [backlog](plugins/backlog) | Capture deferred tasks mid-session into an untracked project backlog without interrupting the current task. | MIT |
+| [todo](plugins/todo) | Capture deferred tasks mid-session into an untracked project todo list without interrupting the current task. | MIT |
 | [skim](plugins/skim) | Keep bulk file contents out of the main model's context: a read guard that teaches outlining first, and a Haiku worker for what still needs the whole file. | MIT |
 
 ## Installation
@@ -13,7 +13,7 @@ Add the marketplace once, then install the plugins you want:
 
 ```
 /plugin marketplace add MarioAer/claude-plugins
-/plugin install backlog@marioaer-plugins
+/plugin install todo@marioaer-plugins
 /plugin install skim@marioaer-plugins
 ```
 
@@ -27,7 +27,7 @@ Updates: `claude plugin update <plugin>@marioaer-plugins`, or enable auto-update
 
 Each plugin has its own README with usage, permissions and design notes:
 
-- [backlog](plugins/backlog/README.md)
+- [todo](plugins/todo/README.md)
 - [skim](plugins/skim/README.md)
 
 ## Repository layout
@@ -39,7 +39,6 @@ plugins/<name>/tests/run.sh       unit suite, no API calls; run by tests/unit.sh
 plugins/<name>/tests/e2e.sh       behavioral scenarios that call the Claude API; manual (where present)
 plugins/<name>/docs/              reference docs for that plugin (where present)
 plugins/<name>/evals/             benchmark harness for that plugin (where present)
-docs/superpowers/                 design specs and implementation plans
 tests/                            repository-wide checks
 ```
 
