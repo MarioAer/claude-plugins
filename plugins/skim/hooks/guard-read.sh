@@ -78,7 +78,7 @@ IFS=$'\037' read -r TOOL SESSION AGENT PATH_ARG LIMIT COMMAND <<<"$FIELDS"
 # deadlock a non-plugin install, where agent_type carries no prefix.
 if [ -n "$AGENT" ]; then
   case "$AGENT" in
-    "$WORKER_NAME" | *:"$WORKER_NAME") allow "worker" ;;
+  "$WORKER_NAME" | *:"$WORKER_NAME") allow "worker" ;;
   esac
 fi
 
@@ -99,17 +99,17 @@ record() {
 
 # --- edits: record and allow -------------------------------------------------
 case "$TOOL" in
-  Edit | Write | NotebookEdit | MultiEdit)
-    [ -n "$PATH_ARG" ] && record edit "$PATH_ARG"
-    allow "edit-recorded"
-    ;;
+Edit | Write | NotebookEdit | MultiEdit)
+  [ -n "$PATH_ARG" ] && record edit "$PATH_ARG"
+  allow "edit-recorded"
+  ;;
 esac
 
 # --- rule 7: bash readers -----------------------------------------------------
 if [ "$TOOL" = "Bash" ]; then
   [ -n "$COMMAND" ] || allow "no-command"
   case "$COMMAND" in
-    *\|* | *\>*) allow "piped-or-redirected" ;;
+  *\|* | *\>*) allow "piped-or-redirected" ;;
   esac
   # shellcheck disable=SC2016  # single quotes are deliberate: this is Python,
   # and the $ inside belongs to a regex, not to the shell.

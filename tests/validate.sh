@@ -7,7 +7,10 @@ set -u
 cd "$(dirname "$0")/.." || exit 2
 
 for dep in jq python3; do
-  command -v "$dep" >/dev/null 2>&1 || { echo "$dep not found"; exit 2; }
+  command -v "$dep" >/dev/null 2>&1 || {
+    echo "$dep not found"
+    exit 2
+  }
 done
 
 passed=0
@@ -15,8 +18,14 @@ failed=0
 MARKETPLACE=".claude-plugin/marketplace.json"
 COMPONENTS="skills commands agents hooks output-styles .mcp.json .lsp.json"
 
-pass() { echo "PASS $1"; passed=$((passed + 1)); }
-fail() { echo "FAIL $1: $2"; failed=$((failed + 1)); }
+pass() {
+  echo "PASS $1"
+  passed=$((passed + 1))
+}
+fail() {
+  echo "FAIL $1: $2"
+  failed=$((failed + 1))
+}
 skip() { echo "SKIP $1: $2"; }
 
 finish() {
@@ -159,9 +168,9 @@ for dir in plugins/*/; do
   # C15: plugin.json license names the license the plugin ships
   license=$(jq -r '.license // ""' "$manifest")
   case "$license" in
-    MIT) license_marker="MIT License" ;;
-    Apache-2.0) license_marker="Apache License" ;;
-    *) license_marker="" ;;
+  MIT) license_marker="MIT License" ;;
+  Apache-2.0) license_marker="Apache License" ;;
+  *) license_marker="" ;;
   esac
   if [ -z "$license" ]; then
     fail "C15 [$plugin]" "plugin.json lacks license"
@@ -182,8 +191,8 @@ for dir in plugins/*/; do
       fail "C12 [$plugin]" "$hooks_file is not valid JSON"
     else
       # shellcheck disable=SC2016  # the literal ${CLAUDE_PLUGIN_ROOT} is matched, not expanded
-      scripts=$(jq -r '.. | .command? // empty' "$hooks_file" \
-        | grep -oE '\$\{CLAUDE_PLUGIN_ROOT\}/[^" ]+' | sed 's#^${CLAUDE_PLUGIN_ROOT}/##')
+      scripts=$(jq -r '.. | .command? // empty' "$hooks_file" |
+        grep -oE '\$\{CLAUDE_PLUGIN_ROOT\}/[^" ]+' | sed 's#^${CLAUDE_PLUGIN_ROOT}/##')
       missing=""
       for script in $scripts; do
         [ -f "$dir$script" ] || missing="$missing $script"

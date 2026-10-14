@@ -21,18 +21,24 @@ new_repo() {
 # User-level settings, plugins and hooks are excluded so results do not depend on the developer's setup.
 # Extra arguments are passed to claude (for example --allowedTools).
 todo() {
-  local prompt=$1; shift
+  local prompt=$1
+  shift
   claude -p "$prompt" --plugin-dir "$PLUGIN" --model "$MODEL" --strict-mcp-config \
     --setting-sources project,local --permission-mode default --max-turns 12 "$@" 2>&1
 }
 
 check() {
-  local label=$1; shift
+  local label=$1
+  shift
   if "$@"; then echo "  ok   $label"; else echo "  FAIL $label"; fi
 }
 
 has_line() { grep -Fxq -- "$2" "$1" 2>/dev/null; }
-line_count() { local n; n=$(grep -c -- "$2" "$1" 2>/dev/null); [ "${n:-0}" -eq "$3" ]; }
+line_count() {
+  local n
+  n=$(grep -c -- "$2" "$1" 2>/dev/null)
+  [ "${n:-0}" -eq "$3" ]
+}
 contains() { grep -Fq -- "$2" <<<"$1"; }
 lacks() { ! grep -Fq -- "$2" <<<"$1"; }
 lacks_line() { ! has_line "$1" "$2"; }
@@ -42,24 +48,27 @@ clean_status() { [ -z "$(git status --porcelain)" ]; }
 
 # Tool calls made in a headless turn, one name per line, from the stream-json transcript.
 tool_calls() {
-  local prompt=$1; shift
+  local prompt=$1
+  shift
   claude -p "$prompt" --plugin-dir "$PLUGIN" --model "$MODEL" --strict-mcp-config \
     --setting-sources project,local --permission-mode default --max-turns 12 \
-    --output-format stream-json --verbose "$@" 2>/dev/null \
-    | jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") | .name'
+    --output-format stream-json --verbose "$@" 2>/dev/null |
+    jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") | .name'
 }
 no_output() { [ -z "$1" ]; }
 
 # One headless run as a JSON result object; the mod answers typed commands without a turn.
 todo_json() {
-  local prompt=$1; shift
+  local prompt=$1
+  shift
   claude -p "$prompt" --plugin-dir "$PLUGIN" --model "$MODEL" --strict-mcp-config \
-    --setting-sources project,local --permission-mode default --max-turns 12 --output-format json "$@" </dev/null 2>/dev/null \
-    | jq -c 'if type == "array" then .[] | select(.type == "result") else . end'
+    --setting-sources project,local --permission-mode default --max-turns 12 --output-format json "$@" </dev/null 2>/dev/null |
+    jq -c 'if type == "array" then .[] | select(.type == "result") else . end'
 }
 # The whole stream-json transcript of one headless run, for text that must or must not appear.
 transcript() {
-  local prompt=$1; shift
+  local prompt=$1
+  shift
   claude -p "$prompt" --plugin-dir "$PLUGIN" --model "$MODEL" --strict-mcp-config \
     --setting-sources project,local --permission-mode default --max-turns 12 \
     --output-format stream-json --verbose "$@" </dev/null 2>/dev/null
@@ -310,7 +319,7 @@ ALL=(S1 S2 S3 S4 S5 S8 S10 S11 S13 S14 S15 S16 S17 S18 S19 S20 S21 S22 S23 S24 S
 echo "todo e2e: model=$MODEL, $(claude --version 2>/dev/null)"
 for id in "${ALL[@]}"; do
   echo "$id"
-  ( "$id" )
+  ("$id")
 done | tee "$WORK/log"
 passed=$(grep -c '^  ok ' "$WORK/log")
 failed=$(grep -c '^  FAIL ' "$WORK/log")

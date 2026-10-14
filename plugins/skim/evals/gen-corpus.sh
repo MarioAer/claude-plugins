@@ -84,10 +84,10 @@ export function recordAttemptOutcome${i}(route: string, attempt: number, ok: boo
 }
 EOF
   done
-} > "$OUT/src/gateway/retry_policy.ts"
+} >"$OUT/src/gateway/retry_policy.ts"
 
 # --- transport: small files, all below threshold (contrast case) -------------
-cat > "$OUT/src/transport/transport.ts" <<'EOF'
+cat >"$OUT/src/transport/transport.ts" <<'EOF'
 /** Wire-level transport abstraction used by the gateway. */
 export interface Transport {
   send(payload: Uint8Array): Promise<Uint8Array>;
@@ -109,7 +109,7 @@ for n in HttpTransport GrpcTransport InMemoryTransport; do
     echo "  async send(payload: Uint8Array): Promise<Uint8Array> { return payload; }"
     echo "  async close(): Promise<void> {}"
     echo "}"
-  } > "$OUT/src/transport/$lc.ts"
+  } >"$OUT/src/transport/$lc.ts"
 done
 
 # --- production.yaml : decoy retry ratio for scenario 1 ----------------------
@@ -121,7 +121,7 @@ done
   done
   printf 'upstream:\n  # NOTE: per-route override, not the global default budget.\n  retry:\n    ratio: 0.05\n    window_seconds: 10\n'
   for i in $(seq 1 150); do echo "timeout_ms_route_${i}: $((100 + i * 7))"; done
-} > "$OUT/config/production.yaml"
+} >"$OUT/config/production.yaml"
 
 # --- store.ts : dense. Scenario 3 targets this. ------------------------------
 python3 - "$OUT/src/session/store.ts" <<'PY'
@@ -171,5 +171,5 @@ bash "$(dirname "$0")/gen-crossfile.sh" "$OUT"
 
 echo "corpus written to $OUT"
 find "$OUT" -type f | sort | while read -r f; do
-  printf "%6s lines %8s bytes  %s\n" "$(wc -l < "$f")" "$(wc -c < "$f")" "${f#"$OUT"/}"
+  printf "%6s lines %8s bytes  %s\n" "$(wc -l <"$f")" "$(wc -c <"$f")" "${f#"$OUT"/}"
 done

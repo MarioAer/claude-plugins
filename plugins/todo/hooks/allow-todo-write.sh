@@ -17,15 +17,15 @@ path=${BASH_REMATCH[1]}
 cwd=${BASH_REMATCH[1]}
 
 case "$path" in
-  /*) ;;
-  *) exit 0 ;;
+/*) ;;
+*) exit 0 ;;
 esac
 case "/$path/" in
-  */../* | */./* | */.claude/* | */.git/*) exit 0 ;;
+*/../* | */./* | */.claude/* | */.git/*) exit 0 ;;
 esac
 case "$path" in
-  */.todo/todo.md | */.todo/.gitignore) ;;
-  *) exit 0 ;;
+*/.todo/todo.md | */.todo/.gitignore) ;;
+*) exit 0 ;;
 esac
 
 # The target must be exactly <root>/.todo/<file>, compared with symlinks resolved.

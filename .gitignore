@@ -1,4 +1,5 @@
 plugins/skim/evals/corpus/
+
 # Written by Claude Code when a plugin is loaded with --plugin-dir (mod type declarations)
 plugins/*/tsconfig.json
 plugins/*/.claude-plugin/types/
