@@ -3,6 +3,8 @@
 export type ReviewPane = {
   index: number
   noteFor: string | null
+  tagsFor: string | null
+  draft: string | null
   done: number
   skipped: number
   notes: number
@@ -11,6 +13,7 @@ export type ReviewPane = {
 export type View = {
   root: string | null
   items: string[]
+  order: string[]
   bandUntil: number
   pane: ReviewPane | null
 }

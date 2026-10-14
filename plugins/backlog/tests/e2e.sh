@@ -277,7 +277,34 @@ S31() {
   check "list text" contains "$(jq -r '.result' <<<"$out")" "1. alpha (2026-01-01)"
 }
 
-ALL=(S1 S2 S3 S4 S5 S8 S10 S11 S13 S14 S15 S16 S17 S18 S19 S20 S21 S22 S23 S24 S26 S27 S28 S29 S30 S31)
+# --- Tags ---
+
+S34() {
+  new_repo "$WORK/s34"
+  out=$(backlog_json "/backlog tagged item #Auth #urgent")
+  check "tagged add starts no model turn" [ "$(jq -r '.num_turns' <<<"$out")" = "0" ]
+  check "text confirmed without tags" contains "$(jq -r '.result' <<<"$out")" "Added to backlog: tagged item"
+  check "tags stored" has_line .backlog/backlog.md "- [ ] tagged item ($TODAY, branch: main, tags: auth, urgent)"
+}
+
+S35() {
+  new_repo "$WORK/s35"
+  mkdir .backlog && printf '# Backlog\n\n- [ ] a (2026-01-01, tags: auth)\n- [ ] b (2026-01-02)\n' >.backlog/backlog.md
+  out=$(backlog_json "/backlog list #auth")
+  check "filtered list starts no model turn" [ "$(jq -r '.num_turns' <<<"$out")" = "0" ]
+  check "matching item listed" contains "$(jq -r '.result' <<<"$out")" "1. a (2026-01-01, tags: auth)"
+  check "other item absent" lacks "$(jq -r '.result' <<<"$out")" "b (2026-01-02)"
+}
+
+# Hooks disabled: the skill's fallback must store the same tags field.
+S36() {
+  new_repo "$WORK/s36"
+  backlog "/backlog fallback tagged #ops" --settings '{"disableAllHooks": true}' \
+    --allowedTools "Read" "Write" "Edit" "Bash(git rev-parse --show-toplevel)" "Bash(git branch --show-current)" "Bash(date +%F)" >/dev/null
+  check "fallback stores the tags field" has_line .backlog/backlog.md "- [ ] fallback tagged ($TODAY, branch: main, tags: ops)"
+}
+
+ALL=(S1 S2 S3 S4 S5 S8 S10 S11 S13 S14 S15 S16 S17 S18 S19 S20 S21 S22 S23 S24 S26 S27 S28 S29 S30 S31 S34 S35 S36)
 [ $# -gt 0 ] && ALL=("$@")
 
 echo "backlog e2e: model=$MODEL, $(claude --version 2>/dev/null)"

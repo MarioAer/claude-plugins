@@ -168,8 +168,114 @@ test('the pane names its keys: plain buttons and a help line in both states', as
   for (const key of ['done', 'skip', 'note', 'close']) {
     assert.equal(find(tree, (n) => n.type === 'Button' && n.key === key).plain, true, key)
   }
-  assert.ok(find(tree, (n) => n.type === 'Text' && n.dimColor === true && /d done, s skip, n note, q close\. Tab moves, Enter presses, Esc returns to the prompt\./.test(n.children)))
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.dimColor === true && /d done, s skip, n note, t tags, q close\. Tab moves, Enter presses, Esc returns to the prompt\./.test(n.children)))
   await press(tree, 'note')
   tree = await pane($, fire)
   assert.ok(find(tree, (n) => n.type === 'Text' && n.dimColor === true && /Enter saves the note, empty Enter cancels, Esc returns to the prompt\./.test(n.children)))
+})
+
+import { arrange, colorOf } from '../../hooks/mod.js'
+import { PALETTE } from '../../hooks/store.js'
+
+const TAGGED3 = '# Backlog\n\n- [x] old (2026-01-01, tags: build)\n- [ ] a (2026-01-02, tags: auth, build)\n- [ ] b (2026-01-03)\n- [ ] c (2026-01-04, tags: build)\n'
+
+test('arrange groups by first tag in tag order, untagged last, empty groups dropped', () => {
+  const items = ['a (2026-01-02, tags: auth, build)', 'b (2026-01-03)', 'c (2026-01-04, tags: build)']
+  assert.deepEqual(arrange(items, ['build', 'auth']), [
+    { tag: 'build', items: ['c (2026-01-04, tags: build)'] },
+    { tag: 'auth', items: ['a (2026-01-02, tags: auth, build)'] },
+    { tag: null, items: ['b (2026-01-03)'] },
+  ])
+  assert.deepEqual(arrange([], ['build']), [])
+  assert.equal(colorOf('auth', ['build', 'auth']), PALETTE[1])
+  assert.equal(colorOf('ninth', ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'ninth']), PALETTE[0])
+})
+
+test('the pane draws coloured group headings, rows in display order and tag chips', async () => {
+  const dir = await repo(TAGGED3); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  const tree = await pane($, fire)
+  const headings = []
+  find(tree, (n) => { if (n.type === 'Text' && n.bold === true && /^(#|untagged)/.test(String(n.children))) headings.push([n.children, n.color]); return false })
+  assert.deepEqual(headings, [['#build', PALETTE[0]], ['#auth', PALETTE[1]], ['untagged', undefined]])
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '1. c (2026-01-04)' && n.bold === true), 'first row is the build item, tags field stripped')
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '#build' && n.color === PALETTE[0] && n.bold !== true), 'tag chip beside the row')
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '2. a (2026-01-02)'))
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '3. b (2026-01-03)'))
+})
+
+test('the cursor walks rows in display order and colours stay stable after done', async () => {
+  const dir = await repo(TAGGED3); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  await press(await pane($, fire), 'skip')
+  let tree = await pane($, fire)
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '2. a (2026-01-02)' && n.bold === true))
+  await press(tree, 'done')
+  assert.match(await read(dir), /- \[x\] a \(2026-01-02, tags: auth, build\)/)
+  tree = await pane($, fire)
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '#auth' && n.bold !== true) === null, 'no auth chip left among open rows')
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '1. c (2026-01-04)'))
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '#build' && n.color === PALETTE[0]), 'build keeps its colour')
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '2. b (2026-01-03)' && n.bold === true), 'cursor on the next row')
+})
+
+test('t shows an input with the current tags; submitting moves the item and keeps the cursor on it', async () => {
+  const dir = await repo(TAGGED3); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  let tree = await pane($, fire)
+  assert.ok(find(tree, (n) => n.type === 'Button' && n.key === 'tags' && n.hotkey === 't' && n.plain === true))
+  assert.ok(find(tree, (n) => n.type === 'Text' && /t tags/.test(String(n.children))))
+  await press(tree, 'tags')
+  tree = await pane($, fire)
+  const input = find(tree, (n) => n.type === 'Input' && n.key === 'tags')
+  assert.equal(input.value, 'build')
+  assert.ok(find(tree, (n) => n.type === 'Text' && /Enter replaces the tags, empty Enter clears them, Esc returns to the prompt\./.test(String(n.children))))
+  await input.onSubmit('auth bad! #Auth')
+  assert.deepEqual($.log.toasts, ['Ignored tag: bad!', 'Tagged: c'])
+  assert.match(await read(dir), /- \[ \] c \(2026-01-04, tags: auth\)\n/)
+  tree = await pane($, fire)
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '2. c (2026-01-04)' && n.bold === true), 'cursor follows the item into the auth group')
+  assert.equal(find(tree, (n) => n.type === 'Text' && n.children === '#build' && n.bold === true), null, 'build group is gone')
+  assert.ok(find(tree, (n) => n.type === 'Button' && n.key === 'done'), 'buttons are back')
+})
+
+test('an empty tag submission clears the tags and moves the item to untagged', async () => {
+  const dir = await repo(TAGGED3); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  await press(await pane($, fire), 'tags')
+  await find(await pane($, fire), (n) => n.type === 'Input').onSubmit('')
+  assert.match(await read(dir), /- \[ \] c \(2026-01-04\)\n/)
+  const tree = await pane($, fire)
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '3. c (2026-01-04)' && n.bold === true))
+})
+
+test('t on a line that vanished reports it and keeps the pane open', async () => {
+  const dir = await repo(TAGGED3); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  await press(await pane($, fire), 'tags')
+  await writeFile(join(dir, '.backlog/backlog.md'), '# Backlog\n\n- [ ] b (2026-01-03)\n')
+  await find(await pane($, fire), (n) => n.type === 'Input').onSubmit('x')
+  assert.deepEqual($.log.toasts, ['Backlog item changed on disk: c'])
+  assert.deepEqual($.log.closed, [])
+  assert.ok(find(await pane($, fire), (n) => n.type === 'Text' && n.children === '1. b (2026-01-03)' && n.bold === true))
+})
+
+test('the tags and note inputs keep what was typed across a redraw', async () => {
+  const dir = await repo(TAGGED3); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  await press(await pane($, fire), 'tags')
+  let input = find(await pane($, fire), (n) => n.type === 'Input' && n.key === 'tags')
+  assert.equal(input.value, 'build')
+  await input.onInput('build au', { surface: 'terminal' })
+  input = find(await pane($, fire), (n) => n.type === 'Input' && n.key === 'tags')
+  assert.equal(input.value, 'build au', 'a redraw re-applies the draft, not the stored tags')
+  await input.onSubmit('build au')
+  assert.deepEqual($.log.toasts.at(-1), 'Tagged: c')
+  assert.match(await read(dir), /- \[ \] c \(2026-01-04, tags: build, au\)\n/)
+  await press(await pane($, fire), 'note')
+  let note = find(await pane($, fire), (n) => n.type === 'Input' && n.key === 'note')
+  assert.equal(note.value, '')
+  await note.onInput('half a', { surface: 'terminal' })
+  note = find(await pane($, fire), (n) => n.type === 'Input' && n.key === 'note')
+  assert.equal(note.value, 'half a', 'the note draft survives a redraw too')
 })

@@ -2,6 +2,8 @@
 
 Read this file only when SKILL.md sends you here for `/backlog review` with open items.
 
+Items may carry a `tags:` field inside their metadata; show it as stored. Tags are edited only in the mod's review pane, never here.
+
 Use the Read tool, not `ls` or `cat`, to inspect files. Read the file before every write. Never create files in review mode. Review actions come only from the user's answers; never decide an answer yourself.
 
 1. Take the backlog file path and the numbered open items from the `BACKLOG_REVIEW` marker. Without a marker (hook not run): run `git rev-parse --show-toplevel` as a single Bash call with nothing else; on success that path is the root, on failure the current working directory is the root (do not mention the failure). The file is `<root>/.backlog/backlog.md`; read it and collect the open items (lines starting with `- [ ] `, without that prefix). If the file is missing or has no open items, print `Backlog is empty.` and stop.
