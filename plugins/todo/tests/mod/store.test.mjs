@@ -291,3 +291,24 @@ test("', tags: ' inside the item text is never read or rewritten as a tags field
   assert.equal(await setTags(io(), dir, item, ['docs']), `${item.slice(0, -1)}, tags: docs)`)
   assert.equal(await read(dir), `# Todo\n\n- [ ] ${item.slice(0, -1)}, tags: docs)\n`)
 })
+
+import { itemNotes, markUndone, listWithOrder } from '../../hooks/store.js'
+
+test('itemNotes keys each open item to its dated sub-bullets; closed items and stray lines are skipped', () => {
+  const content = `${H}- [ ] a (2026-01-01)\n  - 2026-01-02: one\n  - loose text\n- [x] done (2026-01-01)\n  - 2026-01-03: hidden\n- [ ] b (2026-01-01)\n\n  - 2026-01-04: after a blank\n`
+  assert.deepEqual(itemNotes(content), {
+    'a (2026-01-01)': [{ date: '2026-01-02', text: 'one' }, { date: null, text: 'loose text' }],
+    'b (2026-01-01)': [],
+  })
+})
+
+test('markUndone reopens a done line once; listWithOrder carries the notes', async () => {
+  const dir = await scratch()
+  await mkdir(join(dir, '.todo'))
+  await writeFile(join(dir, '.todo/todo.md'), `${H}- [x] a (2026-01-01)\n  - 2026-01-02: n\n`)
+  assert.equal(await markUndone(io(), dir, 'a (2026-01-01)'), true)
+  assert.equal(await read(dir), `${H}- [ ] a (2026-01-01)\n  - 2026-01-02: n\n`)
+  assert.equal(await markUndone(io(), dir, 'a (2026-01-01)'), false)
+  const loaded = await listWithOrder(io(), dir)
+  assert.deepEqual(loaded.notes, { 'a (2026-01-01)': [{ date: '2026-01-02', text: 'n' }] })
+})

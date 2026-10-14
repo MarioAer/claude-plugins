@@ -42,6 +42,19 @@ export function openItems(content) {
   return content.split('\n').filter((line) => line.startsWith('- [ ] ')).map((line) => line.slice(6))
 }
 
+// The notes under each open item: the `  - YYYY-MM-DD: text` lines addNote writes, keyed by item.
+export function itemNotes(content) {
+  const notes = {}
+  let current = null
+  for (const line of content.split('\n')) {
+    if (line.startsWith('- [ ] ')) { current = line.slice(6); notes[current] = []; continue }
+    if (current === null || !line.startsWith('  - ')) { current = null; continue }
+    const match = /^ {2}- (\d{4}-\d{2}-\d{2}): (.*)$/.exec(line)
+    notes[current].push(match ? { date: match[1], text: match[2] } : { date: null, text: line.slice(4) })
+  }
+  return notes
+}
+
 export function stripMeta(item) {
   return item.replace(META, '')
 }
@@ -242,6 +255,16 @@ export function markDone(io, root, item) {
   })
 }
 
+// Reopens an item marked done; false when its done line is gone.
+export function markUndone(io, root, item) {
+  return edit(io, root, (lines) => {
+    const index = lines.indexOf(`- [x] ${item}`)
+    if (index < 0) return null
+    lines[index] = `- [ ] ${item}`
+    return lines
+  })
+}
+
 export function addNote(io, root, item, note) {
   const text = normalize(note)
   return edit(io, root, (lines) => {
@@ -269,10 +292,10 @@ export async function setTags(io, root, item, tags) {
   return written ? updated : null
 }
 
-// The open items and the colour order from one read, for the pane.
+// The open items, the colour order and each item's notes from one read, for the pane.
 export async function listWithOrder(io, root) {
   const folder = `${root}/.todo`
   await checkLinks(io, folder)
   const content = (await io.read(`${folder}/todo.md`)) ?? ''
-  return { items: openItems(content), order: tagOrder(content) }
+  return { items: openItems(content), order: tagOrder(content), notes: itemNotes(content) }
 }
