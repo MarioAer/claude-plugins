@@ -16,6 +16,12 @@ export const KINDS = { q: 'question', t: 'topic' }
 // A condition under which nothing is written; the message is shown to Claude or the user.
 export class Refused extends Error {}
 
+// Cut by code point, as Python slices, so an emoji is never split and both paths store the same text.
+export function cut(text, size) {
+  const chars = [...text]
+  return chars.length > size ? chars.slice(0, size).join('') : text
+}
+
 export function normalize(arg) {
   return String(arg ?? '').replace(/\r/g, ' ').trim()
 }
@@ -34,11 +40,11 @@ export function parse(args) {
     let match = /^\+([qt])\s+(.+)$/i.exec(part)
     if (match) {
       const text = match[2].replace(/\s+/g, ' ').trim()
-      if (text.length > MAX_TEXT) throw new Refused(`thread text longer than ${MAX_TEXT} characters`)
+      if ([...text].length > MAX_TEXT) throw new Refused(`thread text longer than ${MAX_TEXT} characters`)
       return { op: 'add', kind: match[1].toLowerCase(), text }
     }
     match = /^r\s*#?(\d+)(?:\s+(.+))?$/i.exec(part)
-    if (match) return { op: 'resolve', id: Number(match[1]), decision: match[2] ? match[2].slice(0, MAX_TEXT) : null }
+    if (match) return { op: 'resolve', id: Number(match[1]), decision: match[2] ? cut(match[2], MAX_TEXT) : null }
     match = /^x\s*#?(\d+)$/i.exec(part)
     if (match) return { op: 'drop', id: Number(match[1]) }
     throw new Refused(`cannot read "${part.slice(0, 40)}"; use +q text, +t text, r<id> decision or x<id>`)
@@ -49,14 +55,15 @@ export function openThreads(data) {
   return data.threads.filter((t) => t.status === 'open')
 }
 
-// Applies parsed ops to a copy of data. Every id must name an open thread, checked before any
-// change. An add whose text matches an open thread (case-insensitive) is reported, not repeated.
-// Returns { data, changes }, changes like ['+4', '=2', 'r3', 'x5'].
+// Applies parsed ops to a copy of data. Every id must name a thread, checked before any change.
+// An add whose text matches an open thread (case-insensitive) is reported, not repeated, and so is
+// closing a thread already closed, so applying one batch twice changes nothing.
+// Returns { data, changes }, changes like ['+4', '=2', 'r3', 'x5', '~6'].
 export function apply(data, ops, { now, by }) {
   const next = JSON.parse(JSON.stringify(data))
-  const open = new Map(openThreads(next).map((t) => [t.id, t]))
+  const known = new Map(next.threads.map((t) => [t.id, t]))
   for (const op of ops) {
-    if (op.op !== 'add' && !open.has(op.id)) throw new Refused(`#${op.id} is not an open thread`)
+    if (op.op !== 'add' && !known.has(op.id)) throw new Refused(`#${op.id} is not a thread`)
   }
   const changes = []
   for (const op of ops) {
@@ -68,8 +75,8 @@ export function apply(data, ops, { now, by }) {
       changes.push(`+${thread.id}`)
       continue
     }
-    const thread = open.get(op.id)
-    if (thread.status !== 'open') continue
+    const thread = known.get(op.id)
+    if (thread.status !== 'open') { changes.push(`~${thread.id}`); continue }
     thread.status = op.op === 'resolve' ? 'resolved' : 'dropped'
     thread.decision = op.op === 'resolve' ? op.decision : null
     thread.by = by
@@ -80,7 +87,7 @@ export function apply(data, ops, { now, by }) {
 }
 
 export function clip(text, size = CLIP) {
-  return text.length > size ? `${text.slice(0, size - 1)}…` : text
+  return [...text].length > size ? `${cut(text, size - 1)}…` : text
 }
 
 // `#1 q Use Postgres?; #3 t retry policy` for the open threads, at most SHOWN by text.
@@ -130,7 +137,7 @@ export function rootRefused(root) {
 
 // Session ids are the transcript's file name; anything else is refused rather than used in a path.
 export function sessionPath(root, sessionId) {
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) throw new Refused('the session id is not a plain name')
+  if (typeof sessionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) throw new Refused('the session id is not a plain name')
   return `${root}/${FOLDER}/${sessionId}.json`
 }
 
@@ -141,18 +148,24 @@ async function checkLinks(io, root, path) {
   }
 }
 
+const THREAD_KEYS = { id: 'number', kind: 'string', text: 'string', status: 'string', at: 'number', touched: 'number' }
+
+export function validData(data) {
+  return data !== null && typeof data === 'object' && Number.isInteger(data.next) && Array.isArray(data.threads) &&
+    data.threads.every((t) => t !== null && typeof t === 'object' && Array.isArray(t.notes) &&
+      Object.entries(THREAD_KEYS).every(([key, type]) => typeof t[key] === type))
+}
+
+// A file that does not read is refused and left as it is: starting over would reuse its ids.
 export async function load(io, root, sessionId) {
   const path = sessionPath(root, sessionId)
   await checkLinks(io, root, path)
   const text = await io.read(path)
   if (text === null) return emptyData()
-  try {
-    const data = JSON.parse(text)
-    if (!Array.isArray(data.threads) || typeof data.next !== 'number') return emptyData()
-    return data
-  } catch {
-    return emptyData()
-  }
+  let data
+  try { data = JSON.parse(text) } catch { data = null }
+  if (!validData(data)) throw new Refused(`${path} is not a geparkt file; delete it to start over`)
+  return data
 }
 
 // One session writes its own file; the mod and the fallback hook never run for the same call.

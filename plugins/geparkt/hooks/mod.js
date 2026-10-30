@@ -15,11 +15,23 @@ async function getView($) {
   return value ?? EMPTY_VIEW
 }
 
+// Reads, changes and writes with ifVersion, again on a miss, so interleaved events all land.
 async function setView($, change) {
-  const { value, version } = await $.state.get({ plugin: 'geparkt', key: 'view' })
-  const next = change(value ?? EMPTY_VIEW)
-  await $.state.set({ plugin: 'geparkt', key: 'view' }, next, { ifVersion: version })
-  return next
+  for (let attempt = 0; ; attempt++) {
+    const { value, version } = await $.state.get({ plugin: 'geparkt', key: 'view' })
+    const next = change(value ?? EMPTY_VIEW)
+    const { isSet } = await $.state.set({ plugin: 'geparkt', key: 'view' }, next, { ifVersion: version })
+    if (isSet || attempt >= 4) return next
+  }
+}
+
+// Every change to the session file runs after the one before, so a pane key pressed during
+// Claude's call never overwrites it. A reload starts a fresh queue, as it starts a fresh module.
+let queue = Promise.resolve()
+function serial(fn) {
+  const run = queue.then(fn, fn)
+  queue = run.catch(() => {})
+  return run
 }
 
 // The open threads go into the view; the pane's cursor is clamped, an emptied list closes it.
@@ -50,18 +62,23 @@ async function startSession($, e, next) {
 async function callSkill($, e, next) {
   if (e.skill !== SKILL) return next(e)
   // A tool.call answer would precede the permission rules; a deny rule on this call must still win.
+  // Only an allow is answered here; an ask or a deny goes to the engine, which prompts or refuses.
   const { decision } = await $.tool.check({ tool: 'Skill', input: { skill: e.skill, args: e.args } })
-  if (decision === 'deny') return next(e)
+  if (decision !== 'allow') return next(e)
   let marker
+  let recorded = null
+  const { io, root, sessionId } = await where($)
   try {
-    const { io, root, sessionId } = await where($)
     if (store.rootRefused(root)) throw new store.Refused(INSIDE)
-    const recorded = await store.record(io, root, sessionId, e.args, 'claude')
-    await publish($, root, sessionId, recorded.data)
+    recorded = await serial(() => store.record(io, root, sessionId, e.args, 'claude'))
     marker = recorded.marker
   } catch (error) {
     if (!(error instanceof store.Refused)) throw error
     marker = `GEPARKT_FAILED: ${error.message}`
+  }
+  // The batch is saved: a band that fails to redraw must not tell Claude it failed.
+  if (recorded !== null) {
+    try { await publish($, root, sessionId, recorded.data) } catch { /* redrawn on the next event */ }
   }
   return { result: { success: true, commandName: SKILL, status: 'inline' }, context: [store.contextFor(marker)] }
 }
@@ -118,14 +135,19 @@ async function move($, to) {
     : { ...v, pane: { ...v.pane, index: Math.max(0, Math.min(v.threads.length - 1, to(v.pane.index, v.threads.length))) } })
 }
 
-// Applies fn to the cursor's thread in the file and refreshes the view from what was written.
-async function act($, label, fn, counts = {}) {
+// Applies fn to a thread in the file (by default the cursor's) and refreshes the view from what
+// was written.
+async function act($, label, fn, counts = {}, id = null) {
   const view = await getView($)
   if (view.pane === null) return
-  const thread = view.threads[view.pane.index]
-  if (!thread) return
+  const thread = id === null ? view.threads[view.pane.index] : view.threads.find((t) => t.id === id)
+  if (!thread) {
+    if (id !== null) $.ui.toast(`Thread #${id} is no longer open`)
+    await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: null, draft: null, deferFor: null } }))
+    return
+  }
   try {
-    const { data, ok } = await store.change(modsIo($), view.root, view.sessionId, thread.id, fn)
+    const { data, ok } = await serial(() => store.change(modsIo($), view.root, view.sessionId, thread.id, fn))
     $.ui.toast(ok ? `${label}: ${store.clip(thread.text)}` : `Thread #${thread.id} is no longer open`)
     await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, ...(ok ? counts : {}), noteFor: null, draft: null, deferFor: null } }))
     await publish($, view.root, view.sessionId, data)
@@ -141,13 +163,16 @@ const resolveAction = ($) => getView($).then((v) => act($, 'Resolved', (t, now) 
 
 const dropAction = ($) => act($, 'Dropped', (t, now) => { t.status = 'dropped'; t.by = 'user'; t.touched = now })
 
+// The note goes to the thread n was pressed on, wherever the cursor is by now.
 async function noteAction($, value) {
-  const text = store.normalize(value).replace(/\s+/g, ' ').slice(0, store.MAX_TEXT)
-  if (text === '') {
+  const view = await getView($)
+  const target = view.pane?.noteFor ?? null
+  const text = store.cut(store.normalize(value).replace(/\s+/g, ' '), store.MAX_TEXT)
+  if (target === null || text === '') {
     await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: null, draft: null } }))
     return
   }
-  await act($, 'Noted', (t, now) => { t.notes.push({ at: now, text }) })
+  await act($, 'Noted', (t, now) => { t.notes.push({ at: now, text }) }, {}, target)
 }
 
 async function setDraft($, value) {

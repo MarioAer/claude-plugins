@@ -63,11 +63,12 @@ def open_threads(data):
 
 
 def apply(data, ops, now, by):
+    """Closing a thread already closed is reported as ~id, so applying a batch twice changes nothing."""
     data = json.loads(json.dumps(data))
-    is_open = {t["id"]: t for t in open_threads(data)}
+    known = {t["id"]: t for t in data["threads"]}
     for op in ops:
-        if op["op"] != "add" and op["id"] not in is_open:
-            raise Refused("#%d is not an open thread" % op["id"])
+        if op["op"] != "add" and op["id"] not in known:
+            raise Refused("#%d is not a thread" % op["id"])
     changes = []
     for op in ops:
         if op["op"] == "add":
@@ -83,8 +84,9 @@ def apply(data, ops, now, by):
             data["threads"].append(thread)
             changes.append("+%d" % thread["id"])
             continue
-        thread = is_open[op["id"]]
+        thread = known[op["id"]]
         if thread["status"] != "open":
+            changes.append("~%d" % thread["id"])
             continue
         resolve = op["op"] == "resolve"
         thread["status"] = "resolved" if resolve else "dropped"
@@ -126,7 +128,7 @@ def root_refused(root):
 
 
 def session_path(root, session_id):
-    if not SESSION.match(session_id or ""):
+    if not isinstance(session_id, str) or not SESSION.match(session_id):
         raise Refused("the session id is not a plain name")
     return os.path.join(root, FOLDER, session_id + ".json")
 
@@ -137,18 +139,41 @@ def check_links(root, path):
             raise Refused("%s is a symlink" % p)
 
 
+THREAD_KEYS = {"id": int, "kind": str, "text": str, "status": str, "at": (int, float), "touched": (int, float)}
+
+
+def valid_data(data):
+    def valid_thread(t):
+        return isinstance(t, dict) and isinstance(t.get("notes"), list) and all(
+            isinstance(t.get(key), kind) and not isinstance(t.get(key), bool) for key, kind in THREAD_KEYS.items()
+        )
+
+    return (
+        isinstance(data, dict)
+        and isinstance(data.get("next"), int)
+        and not isinstance(data.get("next"), bool)
+        and isinstance(data.get("threads"), list)
+        and all(valid_thread(t) for t in data["threads"])
+    )
+
+
 def load(root, session_id):
+    """A file that does not read is refused and left as it is: starting over would reuse its ids."""
     path = session_path(root, session_id)
     check_links(root, path)
     try:
         with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
+            text = fh.read()
     except FileNotFoundError:
         return empty_data()
-    except (OSError, ValueError):
-        return empty_data()
-    if not isinstance(data.get("threads"), list) or not isinstance(data.get("next"), int):
-        return empty_data()
+    except OSError as error:
+        raise Refused("cannot read %s: %s" % (path, error.strerror or error))
+    try:
+        data = json.loads(text)
+    except ValueError:
+        data = None
+    if not valid_data(data):
+        raise Refused("%s is not a geparkt file; delete it to start over" % path)
     return data
 
 

@@ -29,9 +29,13 @@ test('apply adds with monotonic ids, dedups open threads and never reuses an id'
   assert.equal(data.threads.find((t) => t.id === 1).by, 'claude')
 })
 
-test('apply refuses the whole batch when an id is not open', () => {
+test('apply refuses the whole batch on an unknown id, and closing twice changes nothing', () => {
   const { data } = store.apply(store.emptyData(), store.parse('+q A?'), { now: NOW, by: 'claude' })
-  assert.throws(() => store.apply(data, store.parse('+q B? | r7'), { now: NOW, by: 'claude' }), /#7 is not an open thread/)
+  assert.throws(() => store.apply(data, store.parse('+q B? | r7'), { now: NOW, by: 'claude' }), /#7 is not a thread/)
+  const once = store.apply(data, store.parse('r1 yes | +q B?'), { now: NOW, by: 'claude' })
+  const twice = store.apply(once.data, store.parse('r1 yes | +q B?'), { now: NOW + 1, by: 'claude' })
+  assert.deepEqual(twice.changes, ['~1', '=2'])
+  assert.deepEqual(twice.data, once.data)
 })
 
 test('the marker lists the open ids and clips long text', () => {
@@ -43,6 +47,8 @@ test('the marker lists the open ids and clips long text', () => {
 
 test('session ids that are not plain names are refused', () => {
   assert.throws(() => store.sessionPath('/r', '../x'), /not a plain name/)
+  assert.throws(() => store.sessionPath('/r', null), /not a plain name/)
+  assert.throws(() => store.sessionPath('/r', undefined), /not a plain name/)
   assert.equal(store.sessionPath('/r', 'abc-1'), '/r/.geparkt/abc-1.json')
 })
 
@@ -52,4 +58,18 @@ test('age and staleness', () => {
   assert.equal(store.age(t, 3 * 3600000), '3h')
   assert.equal(store.age(t, 72 * 3600000), '3d')
   assert.equal(store.isStale(t, store.STALE_MS + 1), true)
+})
+
+test('text is cut by code point, never inside an emoji', () => {
+  const text = `${'a'.repeat(58)}😀😀😀`
+  assert.equal(store.clip(text), `${'a'.repeat(58)}😀…`)
+  assert.equal(store.parse(`r1 ${'b'.repeat(299)}😀😀`)[0].decision, `${'b'.repeat(299)}😀`)
+})
+
+test('a file that does not read is refused and left as it is', async () => {
+  const files = new Map([['/r/.geparkt/s.json', '{"next": 3, "threads": [{"id": 1}]}'], ['/r/.geparkt/t.json', '[]']])
+  const io = { read: async (p) => files.get(p) ?? null, stat: async () => null, write: async (p, t) => files.set(p, t), run: async () => ({ exitCode: 1 }), now: () => NOW }
+  await assert.rejects(store.record(io, '/r', 's', '+q A?', 'claude'), /is not a geparkt file/)
+  await assert.rejects(store.load(io, '/r', 't'), /is not a geparkt file/)
+  assert.equal(files.get('/r/.geparkt/s.json'), '{"next": 3, "threads": [{"id": 1}]}')
 })

@@ -25,7 +25,7 @@ Text must not contain `|`. Ids come from the last `GEPARKT_OK` line or the open 
 
 The plugin's hook or mod records the call and puts a line in this invocation's context:
 
-- `GEPARKT_OK: <changes> | open: <threads>`: recorded. Do not mention it to the user; continue or end your turn.
+- `GEPARKT_OK: <changes> | open: <threads>`: recorded (`+4` added, `=2` already open, `r3` resolved, `x5` dropped, `~6` already closed). Do not mention it to the user; continue or end your turn.
 - `GEPARKT_FAILED: <reason>`: nothing was recorded. Fix the batch once if the reason names a mistake in it; otherwise continue without retrying.
 - `GEPARKT_LIST:` followed by lines (the user typed `/geparkt`): print those lines unchanged.
 

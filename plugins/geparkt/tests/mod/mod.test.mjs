@@ -36,14 +36,16 @@ test('a bad batch writes nothing and says why', async () => {
   const dir = await repo(); const { $, fire } = session(dir)
   await fire($, 'tool.call', skill('+q A?'))
   const { out } = await fire($, 'tool.call', skill('+q B? | r9'))
-  assert.match(out.context[0], /^GEPARKT_FAILED: #9 is not an open thread/)
+  assert.match(out.context[0], /^GEPARKT_FAILED: #9 is not a thread/)
   assert.equal((await fileOf(dir)).threads.length, 1)
 })
 
-test('a deny rule wins, and other skills pass through', async () => {
+test('an ask or deny rule goes to the engine, and other skills pass through', async () => {
   const dir = await repo()
-  const denied = session(dir, { toolCheck: { decision: 'deny' } })
-  assert.equal((await denied.fire(denied.$, 'tool.call', skill('+q A?'))).passed, true)
+  for (const decision of ['deny', 'ask']) {
+    const s = session(dir, { toolCheck: { decision } })
+    assert.equal((await s.fire(s.$, 'tool.call', skill('+q A?'))).passed, true)
+  }
   const { $, fire } = session(dir)
   assert.equal((await fire($, 'tool.call', { tool: 'Skill', skill: 'todo:todo', args: 'x' })).passed, true)
 })
@@ -144,4 +146,59 @@ test('pane: defer without the todo plugin changes nothing', async () => {
   await press((await fire($, 'ui.render', paneSite)).out, 'defer')
   assert.deepEqual($.log.toasts, ['Defer needs the todo plugin'])
   assert.equal((await fileOf(dir)).threads[0].status, 'open')
+})
+
+test('a note goes to the thread n was pressed on, even after the list moved', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'tool.call', skill('+q A? | +q B? | +q C?'))
+  await fire($, 'command.run', command())
+  let tree = (await fire($, 'ui.render', paneSite)).out
+  await press(tree, 'down')
+  tree = (await fire($, 'ui.render', paneSite)).out
+  await press(tree, 'note')
+  // Claude resolves #1 meanwhile: the list shifts and the cursor's index now names #3.
+  await fire($, 'tool.call', skill('r1'))
+  tree = (await fire($, 'ui.render', paneSite)).out
+  await find(tree, (n) => n.type === 'Input').onSubmit('only for B')
+  const threads = (await fileOf(dir)).threads
+  assert.deepEqual(threads.map((t) => t.notes.length), [0, 1, 0])
+})
+
+test('a pane key during Claude\'s call does not overwrite either change', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'tool.call', skill('+q A? | +q B?'))
+  await fire($, 'command.run', command())
+  const tree = (await fire($, 'ui.render', paneSite)).out
+  // The first read is slow, so without serialising both writers load the same version.
+  const read = $.fs.read
+  let slow = true
+  $.fs.read = async (path) => {
+    const text = await read(path)
+    if (slow && path.endsWith('s1.json')) { slow = false; await new Promise((r) => setTimeout(r, 50)) }
+    return text
+  }
+  await Promise.all([fire($, 'tool.call', skill('+t C')), press(tree, 'resolve')])
+  const threads = (await fileOf(dir)).threads
+  assert.deepEqual(threads.map((t) => [t.id, t.status]), [[1, 'resolved'], [2, 'open'], [3, 'open']])
+})
+
+test('a band that fails to redraw still reports the saved batch', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  $.ui.close = async () => { throw new Error('gone') }
+  await fire($, 'tool.call', skill('+q A?'))
+  await fire($, 'command.run', command())
+  const { out } = await fire($, 'tool.call', skill('r1'))
+  assert.match(out.context[0], /^GEPARKT_OK: r1/)
+})
+
+test('the view write is retried when another write got in first', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  const set = $.state.set
+  let missed = false
+  $.state.set = async (ref, value, options) => {
+    if (!missed) { missed = true; await set(ref, { ...value, threads: [] }) }
+    return set(ref, value, options)
+  }
+  await fire($, 'tool.call', skill('+q A?'))
+  assert.equal((await fire($, 'ui.render', band)).passed, false)
 })
