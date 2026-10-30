@@ -1,0 +1,12 @@
+{
+  "name": "geparkt",
+  "version": "0.1.0",
+  "description": "Keeps track of the questions Claude asks and the topics it parks, so none get lost down a rabbit hole.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "Mario Erazo"
+  },
+  "repository": "https://github.com/MarioAer/claude-plugins",
+  "license": "MIT",
+  "keywords": ["questions", "open-topics", "session"]
+}
