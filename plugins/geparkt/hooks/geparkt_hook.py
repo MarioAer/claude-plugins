@@ -255,7 +255,7 @@ def main():
         tool_input = event.get("tool_input") or {}
         if tool_input.get("skill") == SKILL:
             record(event, root, tool_input.get("args"))
-    elif name == "UserPromptExpansion" and event.get("command_name") == SKILL:
+    elif name == "UserPromptExpansion" and event.get("command_name") in (SKILL, "geparkt"):
         list_threads(event, root)
 
 

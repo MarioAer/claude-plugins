@@ -148,12 +148,13 @@ async function checkLinks(io, root, path) {
   }
 }
 
-const THREAD_KEYS = { id: 'number', kind: 'string', text: 'string', status: 'string', at: 'number', touched: 'number' }
+// Ids are whole numbers, as geparkt_hook.py requires; the timestamps may be any number.
+const THREAD_KEYS = { id: 'integer', kind: 'string', text: 'string', status: 'string', at: 'number', touched: 'number' }
 
 export function validData(data) {
   return data !== null && typeof data === 'object' && Number.isInteger(data.next) && Array.isArray(data.threads) &&
     data.threads.every((t) => t !== null && typeof t === 'object' && Array.isArray(t.notes) &&
-      Object.entries(THREAD_KEYS).every(([key, type]) => typeof t[key] === type))
+      Object.entries(THREAD_KEYS).every(([key, type]) => type === 'integer' ? Number.isInteger(t[key]) : typeof t[key] === type))
 }
 
 // A file that does not read is refused and left as it is: starting over would reuse its ids.
@@ -195,8 +196,9 @@ export async function change(io, root, sessionId, id, fn) {
   const data = await load(io, root, sessionId)
   const thread = data.threads.find((t) => t.id === id && t.status === 'open')
   if (!thread) return { data, ok: false }
-  fn(thread, io.now())
-  thread.touched = io.now()
+  const now = io.now()
+  fn(thread, now)
+  thread.touched = now
   await save(io, root, sessionId, data)
   return { data, ok: true }
 }

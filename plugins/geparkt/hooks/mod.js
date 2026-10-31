@@ -34,19 +34,36 @@ function serial(fn) {
   return run
 }
 
-// The open threads go into the view; the pane's cursor is clamped, an emptied list closes it.
+// The open threads go into the view and the pane's cursor is clamped, on the pane as it is at the
+// write. An emptied list closes the pane; closePane then clears it, after its summary toast.
+// Called only inside serial(), so views are written in the order the file was.
 async function publish($, root, sessionId, data) {
   const threads = store.openThreads(data)
-  const before = await getView($)
-  const pane = before.pane && threads.length > 0 ? { ...before.pane, index: Math.min(before.pane.index, threads.length - 1) } : null
-  await setView($, (v) => ({ ...v, root, sessionId, threads, pane }))
-  if (before.pane !== null && pane === null) await $.ui.close({ id: PANE })
+  let emptied = false
+  await setView($, (v) => {
+    emptied = v.pane !== null && threads.length === 0
+    const pane = v.pane && { ...v.pane, index: Math.max(0, Math.min(v.pane.index, threads.length - 1)) }
+    return { ...v, root, sessionId, threads, pane }
+  })
+  if (emptied) await $.ui.close({ id: PANE })
 }
 
+// The project root, from git once per working directory.
+let located = null
 async function where($) {
   const io = modsIo($)
-  const root = await store.locate(io, await $.session.cwd())
-  return { io, root, sessionId: await $.session.id() }
+  const cwd = await $.session.cwd()
+  if (located === null || located.cwd !== cwd) located = { cwd, root: await store.locate(io, cwd) }
+  return { io, root: located.root, sessionId: await $.session.id() }
+}
+
+// Loads the file and redraws from it, after any change already queued.
+function refresh($, io, root, sessionId) {
+  return serial(async () => {
+    const data = await store.load(io, root, sessionId)
+    await publish($, root, sessionId, data)
+    return data
+  })
 }
 
 // Loads this session's threads, so the band is right after a resume or a reload.
@@ -54,7 +71,7 @@ async function startSession($, e, next) {
   const result = await next(e)
   try {
     const { io, root, sessionId } = await where($)
-    if (!store.rootRefused(root)) await publish($, root, sessionId, await store.load(io, root, sessionId))
+    if (!store.rootRefused(root)) await refresh($, io, root, sessionId)
   } catch { /* the band stays empty */ }
   return result
 }
@@ -64,21 +81,31 @@ async function callSkill($, e, next) {
   // A tool.call answer would precede the permission rules; a deny rule on this call must still win.
   // Only an allow is answered here; an ask or a deny goes to the engine, which prompts or refuses.
   const { decision } = await $.tool.check({ tool: 'Skill', input: { skill: e.skill, args: e.args } })
-  if (decision !== 'allow') return next(e)
-  let marker
-  let recorded = null
+  if (decision === 'deny') return next(e)
   const { io, root, sessionId } = await where($)
+  if (decision !== 'allow') {
+    // On an approved ask the fallback hook writes the file, so the call holds the queue and the
+    // view is redrawn from the file after it.
+    return serial(async () => {
+      const result = await next(e)
+      try {
+        if (!store.rootRefused(root)) await publish($, root, sessionId, await store.load(io, root, sessionId))
+      } catch { /* redrawn on the next event */ }
+      return result
+    })
+  }
+  let marker
   try {
     if (store.rootRefused(root)) throw new store.Refused(INSIDE)
-    recorded = await serial(() => store.record(io, root, sessionId, e.args, 'claude'))
-    marker = recorded.marker
+    marker = await serial(async () => {
+      const recorded = await store.record(io, root, sessionId, e.args, 'claude')
+      // The batch is saved: a band that fails to redraw must not tell Claude it failed.
+      try { await publish($, root, sessionId, recorded.data) } catch { /* redrawn on the next event */ }
+      return recorded.marker
+    })
   } catch (error) {
     if (!(error instanceof store.Refused)) throw error
     marker = `GEPARKT_FAILED: ${error.message}`
-  }
-  // The batch is saved: a band that fails to redraw must not tell Claude it failed.
-  if (recorded !== null) {
-    try { await publish($, root, sessionId, recorded.data) } catch { /* redrawn on the next event */ }
   }
   return { result: { success: true, commandName: SKILL, status: 'inline' }, context: [store.contextFor(marker)] }
 }
@@ -93,12 +120,11 @@ async function runCommand($, e, next) {
   if (store.rootRefused(root)) return { text: `Geparkt failed: ${INSIDE}` }
   let data
   try {
-    data = await store.load(io, root, sessionId)
+    data = await refresh($, io, root, sessionId)
   } catch (error) {
     if (!(error instanceof store.Refused)) throw error
     return { text: `Geparkt failed: ${error.message}` }
   }
-  await publish($, root, sessionId, data)
   const threads = store.openThreads(data)
   const wantsList = store.normalize(e.args).toLowerCase() === 'list'
   if (wantsList || threads.length === 0 || (await $.session.surfaces()).length === 0) {
@@ -136,8 +162,8 @@ async function move($, to) {
 }
 
 // Applies fn to a thread in the file (by default the cursor's) and refreshes the view from what
-// was written.
-async function act($, label, fn, counts = {}, id = null) {
+// was written. counts(pane) gives the pane fields a change adds to, read at the write.
+async function act($, label, fn, counts = () => ({}), id = null) {
   const view = await getView($)
   if (view.pane === null) return
   const thread = id === null ? view.threads[view.pane.index] : view.threads.find((t) => t.id === id)
@@ -147,21 +173,22 @@ async function act($, label, fn, counts = {}, id = null) {
     return
   }
   try {
-    const { data, ok } = await serial(() => store.change(modsIo($), view.root, view.sessionId, thread.id, fn))
+    const ok = await serial(async () => {
+      const { data, ok } = await store.change(modsIo($), view.root, view.sessionId, thread.id, fn)
+      await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, ...(ok ? counts(v.pane) : {}), noteFor: null, draft: null, deferFor: null } }))
+      await publish($, view.root, view.sessionId, data)
+      return ok
+    })
     $.ui.toast(ok ? `${label}: ${store.clip(thread.text)}` : `Thread #${thread.id} is no longer open`)
-    await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, ...(ok ? counts : {}), noteFor: null, draft: null, deferFor: null } }))
-    await publish($, view.root, view.sessionId, data)
   } catch (error) {
     if (!(error instanceof store.Refused)) throw error
     $.ui.toast(`Geparkt failed: ${error.message}`)
   }
 }
 
-const resolveAction = ($) => getView($).then((v) => act($, 'Resolved', (t, now) => {
-  t.status = 'resolved'; t.by = 'user'; t.touched = now
-}, { resolved: (v.pane?.resolved ?? 0) + 1 }))
+const resolveAction = ($) => act($, 'Resolved', (t) => { t.status = 'resolved'; t.by = 'user' }, (pane) => ({ resolved: pane.resolved + 1 }))
 
-const dropAction = ($) => act($, 'Dropped', (t, now) => { t.status = 'dropped'; t.by = 'user'; t.touched = now })
+const dropAction = ($) => act($, 'Dropped', (t) => { t.status = 'dropped'; t.by = 'user' })
 
 // The note goes to the thread n was pressed on, wherever the cursor is by now.
 async function noteAction($, value) {
@@ -172,7 +199,7 @@ async function noteAction($, value) {
     await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: null, draft: null } }))
     return
   }
-  await act($, 'Noted', (t, now) => { t.notes.push({ at: now, text }) }, {}, target)
+  await act($, 'Noted', (t, now) => { t.notes.push({ at: now, text }) }, () => ({}), target)
 }
 
 async function setDraft($, value) {
@@ -207,7 +234,7 @@ async function deferAction($) {
     await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, deferFor: null } }))
     return
   }
-  await act($, 'Deferred to todo', (t, now) => { t.status = 'deferred'; t.by = 'user'; t.touched = now })
+  await act($, 'Deferred to todo', (t) => { t.status = 'deferred'; t.by = 'user' })
 }
 
 async function renderPane($, e, next) {

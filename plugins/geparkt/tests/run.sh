@@ -55,6 +55,8 @@ case "$out" in "$rule"$'\n'"Open threads (geparkt): #2 t retry policy."*) check 
 
 out=$(context "$(printf '{"hook_event_name":"UserPromptExpansion","session_id":"s1","cwd":"%s","command_name":"geparkt:geparkt","command_args":""}' "$REPO")")
 case "$out" in "GEPARKT_LIST:"$'\n'"#2 topic · retry policy"*) check "typed /geparkt lists" ok ;; *) check "list" fail "$out" ;; esac
+out=$(context "$(printf '{"hook_event_name":"UserPromptExpansion","session_id":"s1","cwd":"%s","command_name": "geparkt","command_args":""}' "$REPO")")
+case "$out" in "GEPARKT_LIST:"*) check "typed /geparkt under its short name lists" ok ;; *) check "short name" fail "$out" ;; esac
 
 out=$(context "$(skill_event s1 "$REPO" geparkt:geparkt 'r1 Postgres')")
 case "$out" in "GEPARKT_OK: ~1 | open: #2 t retry policy"*) check "closing twice changes nothing" ok ;; *) check "closing twice" fail "$out" ;; esac

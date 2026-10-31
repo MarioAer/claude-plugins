@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, realpath, symlink, mkdir } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile, realpath, symlink, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -201,4 +201,73 @@ test('the view write is retried when another write got in first', async () => {
   }
   await fire($, 'tool.call', skill('+q A?'))
   assert.equal((await fire($, 'ui.render', band)).passed, false)
+})
+
+test('an approved ask call redraws the band from the file the fallback hook wrote', async () => {
+  const dir = await repo(); const { $, fire } = session(dir, { toolCheck: { decision: 'ask' } })
+  // Stands for geparkt_hook.py, which records the call once the person approves it.
+  await mkdir(join(dir, '.geparkt'))
+  await writeFile(join(dir, '.geparkt/s1.json'), JSON.stringify({ version: 1, next: 2, threads: [{ id: 1, kind: 'q', text: 'A?', status: 'open', notes: [], at: 0, touched: 0 }] }))
+  assert.equal((await fire($, 'tool.call', skill('+q A?'))).passed, true)
+  assert.equal((await fire($, 'ui.render', band)).passed, false)
+})
+
+test('a note started while Claude\'s call redraws the view is kept', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'tool.call', skill('+q A?'))
+  await fire($, 'command.run', command())
+  const tree = (await fire($, 'ui.render', paneSite)).out
+  // The note key lands between the redraw's read of the view and its write.
+  const get = $.state.get
+  let armed = false
+  $.state.get = async (ref) => {
+    const value = await get(ref)
+    if (armed) { armed = false; await press(tree, 'note') }
+    return value
+  }
+  const read = $.fs.read
+  $.fs.read = async (path) => { const text = await read(path); if (path.endsWith('s1.json')) armed = true; return text }
+  await fire($, 'tool.call', skill('+t B'))
+  $.fs.read = read
+  assert.ok(find((await fire($, 'ui.render', paneSite)).out, (n) => n.type === 'Input'))
+})
+
+test('resolving the last thread still shows the summary when the pane closes', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'tool.call', skill('+q A?'))
+  await fire($, 'command.run', command())
+  await press((await fire($, 'ui.render', paneSite)).out, 'resolve')
+  assert.deepEqual($.log.closed, ['geparkt-review'])
+  await fire($, 'ui.close', { id: 'geparkt-review' })
+  assert.ok($.log.toasts.includes('Geparkt: 1 resolved'))
+})
+
+test('two quick resolves both count', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'tool.call', skill('+q A? | +q B?'))
+  await fire($, 'command.run', command())
+  const tree = (await fire($, 'ui.render', paneSite)).out
+  const read = $.fs.read
+  let slow = true
+  $.fs.read = async (path) => {
+    const text = await read(path)
+    if (slow && path.endsWith('s1.json')) { slow = false; await new Promise((r) => setTimeout(r, 50)) }
+    return text
+  }
+  const first = press(tree, 'resolve')
+  await press(tree, 'down')
+  await Promise.all([first, press(tree, 'resolve')])
+  await fire($, 'tool.call', skill('+q C?'))
+  const header = find((await fire($, 'ui.render', paneSite)).out, (n) => n.type === 'Text' && /resolved$/.test(n.children))
+  assert.equal(header.children, 'Geparkt · 1 open · 2 resolved')
+})
+
+test('git is asked for the root once per working directory', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  const run = $.process.run
+  let calls = 0
+  $.process.run = (argv, init) => { calls++; return run(argv, init) }
+  await fire($, 'tool.call', skill('+q A?'))
+  await fire($, 'tool.call', skill('r1'))
+  assert.equal(calls, 1)
 })

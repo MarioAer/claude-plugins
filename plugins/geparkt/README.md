@@ -35,7 +35,8 @@ If another skill or command already uses the name `geparkt`, use `/geparkt:gepar
 - One JSON file per session: `<project root>/.geparkt/<session id>.json`. `.geparkt/.gitignore` contains `*`, so the folder ignores itself and never appears in a commit, the same as todo's `.todo/`.
 - Threads belong to their session. They survive `/compact`, a resume and a plugin reload; a new session, or `/clear`, starts with none. Use `f` to keep a thread beyond the session.
 - A file that does not parse is refused and left as it is, never replaced, so ids are not reused; delete it to start over.
-- Changes from the pane and from Claude's calls are written one at a time, so neither overwrites the other.
+- Changes from the pane and from Claude's calls are written one at a time, so neither overwrites the other. A call that waits for your approval holds the others back until it is answered.
+- The fallback hook replaces the file in one step; the mod writes it in place, as the mods API has no rename, so a crash mid-write can leave a file that is then refused.
 - Each thread holds its id (never reused), kind, text, status (`open`, `resolved`, `dropped`, `deferred`), the decision, who closed it (`claude` or `user`), notes and two timestamps.
 
 ## Without the mod
@@ -45,7 +46,7 @@ On Claude Code before 2.1.287, with `--safe-mode`, `disableAllHooks` or wherever
 ## Permissions
 
 - The mod and the hook write only `<root>/.geparkt/` (the session's file and `.gitignore`), refuse symlinks there and session ids that are not plain names, and run only `git rev-parse` with fixed arguments. Thread text is never a subprocess argument.
-- The mod answers Claude's own `Skill(geparkt:geparkt)` call itself, only when the engine's permission decision is allow: an `ask` or `deny` rule on `Skill(geparkt:geparkt)` goes to the engine, which prompts or refuses (the fallback hook then records an allowed call). No other tool call is answered or approved.
+- The mod answers Claude's own `Skill(geparkt:geparkt)` call itself, only when the engine's permission decision is allow: an `ask` or `deny` rule on `Skill(geparkt:geparkt)` goes to the engine, which prompts or refuses (the fallback hook then records an allowed call, and the band is redrawn from the file after it). No other tool call is answered or approved.
 - Deferring to todo runs `/todo` through Claude Code's command API, only after the second `f`, and only when a `todo:todo` command exists.
 
 ## License

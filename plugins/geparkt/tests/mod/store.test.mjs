@@ -73,3 +73,9 @@ test('a file that does not read is refused and left as it is', async () => {
   await assert.rejects(store.load(io, '/r', 't'), /is not a geparkt file/)
   assert.equal(files.get('/r/.geparkt/s.json'), '{"next": 3, "threads": [{"id": 1}]}')
 })
+
+test('an id that is not a whole number is refused, as the fallback hook refuses it', () => {
+  const thread = { id: 2.5, kind: 'q', text: 'A?', status: 'open', notes: [], at: 0, touched: 0 }
+  assert.equal(store.validData({ next: 3, threads: [thread] }), false)
+  assert.equal(store.validData({ next: 3, threads: [{ ...thread, id: 2, at: 0.5 }] }), true)
+})
