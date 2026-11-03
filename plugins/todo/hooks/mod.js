@@ -484,6 +484,30 @@ async function runCommand($, e, next) {
   return answerAdd(marker, kind, (await $.session.surfaces()).length > 0)
 }
 
+// Known tags completing a #prefix typed after /todo or /todo:capture, at most MAX_TAGS, in the
+// file's tag order. Any other prompt gets none. Exported for tests.
+const TAG_TOKEN = /^#[a-z0-9_-]*$/
+export function tagSuggestions(text, token, order) {
+  if (!/^\/todo(:capture)? /.test(text) || !TAG_TOKEN.test(token)) return []
+  const prefix = token.slice(1)
+  return order.filter((tag) => tag.startsWith(prefix)).slice(0, store.MAX_TAGS).map((tag) => ({ text: `#${tag}`, label: `#${tag}` }))
+}
+
+async function autocomplete($, e, next) {
+  if (!/^\/todo(:capture)? /.test(e.text) || !TAG_TOKEN.test(e.token)) return next(e)
+  const io = modsIo($)
+  const located = await store.locate(io, await $.session.cwd())
+  if (store.rootRefused(located)) return next(e)
+  try {
+    const { order } = await store.listWithOrder(io, located.root)
+    const suggestions = tagSuggestions(e.text, e.token, order)
+    return suggestions.length > 0 ? { suggestions } : next(e)
+  } catch (error) {
+    if (error instanceof store.Refused) return next(e)
+    throw error
+  }
+}
+
 // Registers the immediate /todo. A refusal (an older engine, or a name taken by another plugin)
 // leaves /todo:capture, which waits for the turn to end; one toast says so.
 async function startSession($, e, next) {
@@ -531,6 +555,7 @@ export const register = (on) => {
   on('command.run', { command: COMMAND }, runCommand)
   on('tool.call', { tool: 'Skill' }, callSkill)
   on('prompt.submit', submitPrompt)
+  on('prompt.autocomplete', autocomplete)
   on('ui.render', { component: 'AbovePrompt' }, renderBand)
   on('ui.render', { component: 'Pane', requestId: 'todo-review' }, renderPane)
   on('ui.close', { id: 'todo-review' }, closePane)

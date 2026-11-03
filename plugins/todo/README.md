@@ -18,6 +18,7 @@ Records tasks you want to defer while Claude Code keeps working on the current t
 | `/todo <text>` | Add an item, also while Claude is working, and confirm with a toast; Claude's turn continues untouched. Trailing `#tags` (letters, digits, `-`, `_`, up to 8) are stored as tags. |
 | `/todo` | Open a one-line input for the item (headless: ask once, then take the next prompt). |
 | `/todo list` | Show open items as a numbered list. |
+| `/todo … #` | With the mod loaded, typing `#` after `/todo` completes the tags already in the list. |
 | `/todo list #<tag>` | Show only the open items carrying that tag. |
 | `/todo review` | For each open item, answer done, skip, update or quit; changes are shown, then written once. |
 

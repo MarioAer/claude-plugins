@@ -239,3 +239,27 @@ test('/todo list keeps its text answer', async () => {
   const dir = await repo(); const { $, fire } = session(dir)
   assert.equal((await fire($, 'command.run', typed('list'))).out.text, 'Todo list is empty.')
 })
+
+import { tagSuggestions } from '../../hooks/mod.js'
+
+test('tagSuggestions completes a #prefix after /todo only', () => {
+  assert.deepEqual(tagSuggestions('/todo fix #fl', '#fl', ['flaky', 'auth']), [{ text: '#flaky', label: '#flaky' }])
+  assert.deepEqual(tagSuggestions('/todo:capture fix #a', '#a', ['flaky', 'auth']), [{ text: '#auth', label: '#auth' }])
+  assert.deepEqual(tagSuggestions('fix #fl', '#fl', ['flaky']), [])
+  assert.deepEqual(tagSuggestions('/todo fix fl', 'fl', ['flaky']), [])
+  assert.equal(tagSuggestions('/todo x #', '#', ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']).length, 8)
+})
+
+test('prompt.autocomplete suggests known tags and passes other input through', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('tagged #auth'))
+  const { passed, out } = await fire($, 'prompt.autocomplete', { text: '/todo y #a', cursor: 10, token: '#a', start: 8 })
+  assert.equal(passed, false)
+  assert.deepEqual(out, { suggestions: [{ text: '#auth', label: '#auth' }] })
+  assert.equal((await fire($, 'prompt.autocomplete', { text: 'hello #a', cursor: 8, token: '#a', start: 6 })).passed, true)
+})
+
+test('prompt.autocomplete passes through inside .git', async () => {
+  const dir = await repo(); const { $, fire } = session(join(dir, '.git'))
+  assert.equal((await fire($, 'prompt.autocomplete', { text: '/todo #', cursor: 7, token: '#', start: 6 })).passed, true)
+})
