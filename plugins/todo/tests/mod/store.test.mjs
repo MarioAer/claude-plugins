@@ -45,12 +45,12 @@ function gitInit(dir) { execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'mai
 
 test('locate: git root and unborn branch from a subdirectory', async () => {
   const dir = await scratch(); gitInit(dir); await mkdir(join(dir, 'src/sub'), { recursive: true })
-  assert.deepEqual(await locate(nodeIo(), join(dir, 'src/sub')), { root: dir, branch: 'main' })
+  assert.deepEqual(await locate(nodeIo(), join(dir, 'src/sub')), { root: dir, branch: 'main', inRepo: true })
 })
 
 test('locate: non-git directory is its own root without a branch', async () => {
   const dir = await scratch()
-  assert.deepEqual(await locate(nodeIo(), dir), { root: dir, branch: null })
+  assert.deepEqual(await locate(nodeIo(), dir), { root: dir, branch: null, inRepo: false })
 })
 
 test('locate: detached HEAD has no branch', async () => {
@@ -60,10 +60,11 @@ test('locate: detached HEAD has no branch', async () => {
   assert.equal((await locate(nodeIo(), dir)).branch, null)
 })
 
-test('rootRefused for .git and .claude components only', () => {
-  assert.equal(rootRefused('/a/.git/hooks'), true)
-  assert.equal(rootRefused('/a/.claude'), true)
-  assert.equal(rootRefused('/a/my.claude.repo'), false)
+test('rootRefused for .git and .claude components outside a work tree only', () => {
+  assert.equal(rootRefused({ root: '/a/.git/hooks', inRepo: false }), true)
+  assert.equal(rootRefused({ root: '/a/.claude', inRepo: false }), true)
+  assert.equal(rootRefused({ root: '/a/my.claude.repo', inRepo: false }), false)
+  assert.equal(rootRefused({ root: '/r/.claude/worktrees/wt', inRepo: true }), false)
 })
 
 test('checkLinks refuses a symlinked folder or file with the Python wording', async () => {

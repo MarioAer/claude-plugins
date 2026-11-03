@@ -21,7 +21,7 @@ case "$path" in
 *) exit 0 ;;
 esac
 case "/$path/" in
-*/../* | */./* | */.claude/* | */.git/*) exit 0 ;;
+*/../* | */./*) exit 0 ;;
 esac
 case "$path" in
 */.todo/todo.md | */.todo/.gitignore) ;;
@@ -30,7 +30,13 @@ esac
 
 # The target must be exactly <root>/.todo/<file>, compared with symlinks resolved.
 [ -d "$cwd" ] || exit 0
-root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || root=$cwd
+# A work tree root is never inside .git; a worktree may sit under .claude/worktrees.
+if ! root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null); then
+  root=$cwd
+  case "/$root/" in
+  */.claude/* | */.git/*) exit 0 ;;
+  esac
+fi
 root=$(cd -P "$root" 2>/dev/null && pwd) || exit 0
 todo_dir=${path%/*}
 [ -L "$todo_dir" ] && exit 0

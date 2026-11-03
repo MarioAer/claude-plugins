@@ -58,6 +58,12 @@ expect "nested .todo below root" none Write "$WORK/gitrepo/src/.todo/todo.md" "$
 expect "symlinked parent directory" none Write "$WORK/plain/link/.todo/todo.md" "$WORK/plain"
 expect "root reached through symlink" allow Write "$WORK/repolink/.todo/todo.md" "$WORK/gitrepo"
 expect "missing cwd" none Write "$WORK/plain/.todo/todo.md" ""
+mkdir -p "$WORK/wtrepo" "$WORK/nogit/.claude"
+git -C "$WORK/wtrepo" init -q
+git -C "$WORK/wtrepo" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m init
+git -C "$WORK/wtrepo" worktree add -q -b wt "$WORK/wtrepo/.claude/worktrees/wt"
+expect "worktree under .claude" allow Write "$WORK/wtrepo/.claude/worktrees/wt/.todo/todo.md"
+expect "non-git cwd .claude root" none Write "$WORK/nogit/.claude/.todo/todo.md"
 
 # Write may only create; existing files must be changed with Edit.
 mkdir -p "$WORK/full/.todo" && printf '# Todo\n' >"$WORK/full/.todo/todo.md"
