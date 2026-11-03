@@ -230,21 +230,36 @@ async function backAction($) {
   await $.ui.close({ id: PANE })
 }
 
+// What todo's answer to another plugin's /todo means: todo returns its marker line to plugin
+// callers, so the check does not depend on the wording of its replies. Exported for tests.
+export function deferOutcome(text) {
+  if (text.startsWith('TODO_ADDED: ') || text.startsWith('TODO_DUPLICATE: ')) return 'ok'
+  if (text.startsWith('TODO_FAILED: ')) return { failed: text.slice('TODO_FAILED: '.length) }
+  return { failed: 'no answer from the todo plugin' }
+}
+
+// todo's immediate /todo where registered, else its skill command.
+async function todoCommand($) {
+  const commands = (await $.command.list()).map((c) => c.name)
+  return ['todo', 'todo:capture'].find((name) => commands.includes(name)) ?? null
+}
+
 // The first f asks, the second hands the thread to the todo plugin and marks it deferred.
 async function deferAction($) {
   const view = await getView($)
   if (view.pane === null) return
   const thread = view.threads[view.pane.index]
   if (!thread) return
+  const command = await todoCommand($)
+  if (command === null) { $.ui.toast('Defer needs the todo plugin'); return }
   if (view.pane.deferFor !== thread.id) {
-    const commands = (await $.command.list()).map((c) => c.name)
-    if (!commands.includes('todo:todo')) { $.ui.toast('Defer needs the todo plugin'); return }
     await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, deferFor: thread.id } }))
     return
   }
-  const { text = '' } = await $.command.run({ command: 'todo:todo', args: `${thread.text} #question` })
-  if (!/^(Added to|Already on) todo list/.test(text)) {
-    $.ui.toast(text === '' ? 'Todo did not confirm the item' : text)
+  const { text = '' } = await $.command.run({ command, args: `${thread.text} #question` })
+  const outcome = deferOutcome(text)
+  if (outcome !== 'ok') {
+    $.ui.toast(`Defer failed: ${outcome.failed}`)
     await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, deferFor: null } }))
     return
   }

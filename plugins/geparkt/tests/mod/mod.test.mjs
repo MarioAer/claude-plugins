@@ -126,7 +126,7 @@ test('pane: resolve, note, back and close', async () => {
 })
 
 test('pane: defer asks once, then hands the thread to todo', async () => {
-  const dir = await repo(); const { $, fire } = session(dir, { commands: ['todo:todo'] })
+  const dir = await repo(); const { $, fire } = session(dir, { commands: ['todo', 'todo:capture'], todoReply: 'TODO_ADDED: A?' })
   await fire($, 'tool.call', skill('+q A?'))
   await fire($, 'command.run', command())
   let tree = (await fire($, 'ui.render', paneSite)).out
@@ -135,7 +135,7 @@ test('pane: defer asks once, then hands the thread to todo', async () => {
   tree = (await fire($, 'ui.render', paneSite)).out
   assert.ok(find(tree, (n) => n.type === 'Button' && n.label === 'defer: press f again'))
   await press(tree, 'defer')
-  assert.deepEqual($.log.commands[0], { command: 'todo:todo', args: 'A? #question' })
+  assert.deepEqual($.log.commands[0], { command: 'todo', args: 'A? #question' })
   assert.equal((await fileOf(dir)).threads[0].status, 'deferred')
 })
 
@@ -293,4 +293,41 @@ test('typed /geparkt and /geparkt:track both answer', async () => {
     assert.equal(passed, false, name)
     assert.equal(out.text, 'No open threads.')
   }
+})
+
+import { deferOutcome } from '../../hooks/mod.js'
+
+test('deferOutcome reads todo\'s marker', () => {
+  assert.equal(deferOutcome('TODO_ADDED: q #question'), 'ok')
+  assert.equal(deferOutcome('TODO_DUPLICATE: q'), 'ok')
+  assert.deepEqual(deferOutcome('TODO_FAILED: the reason'), { failed: 'the reason' })
+  assert.deepEqual(deferOutcome('Added to todo list: q'), { failed: 'no answer from the todo plugin' })
+  assert.deepEqual(deferOutcome(''), { failed: 'no answer from the todo plugin' })
+})
+
+async function deferTwice(options) {
+  const dir = await repo(); const { $, fire } = session(dir, options)
+  await fire($, 'tool.call', skill('+q A?'))
+  await fire($, 'command.run', command())
+  await press((await fire($, 'ui.render', paneSite)).out, 'defer')
+  await press((await fire($, 'ui.render', paneSite)).out, 'defer')
+  return { $, dir }
+}
+
+test('pane: defer uses /todo:capture when /todo is not registered', async () => {
+  const { $, dir } = await deferTwice({ commands: ['todo:capture'], todoReply: 'TODO_DUPLICATE: A?' })
+  assert.equal($.log.commands[0].command, 'todo:capture')
+  assert.equal((await fileOf(dir)).threads[0].status, 'deferred')
+})
+
+test('pane: an English reply instead of the marker leaves the thread open', async () => {
+  const { $, dir } = await deferTwice({ commands: ['todo'], todoReply: 'Added to todo list: A?' })
+  assert.equal((await fileOf(dir)).threads[0].status, 'open')
+  assert.ok($.log.toasts.some((t) => /no answer from the todo plugin/.test(t)))
+})
+
+test('pane: a todo failure is named in a toast and leaves the thread open', async () => {
+  const { $, dir } = await deferTwice({ commands: ['todo'], todoReply: 'TODO_FAILED: x is a symlink' })
+  assert.equal((await fileOf(dir)).threads[0].status, 'open')
+  assert.ok($.log.toasts.some((t) => /x is a symlink/.test(t)))
 })
