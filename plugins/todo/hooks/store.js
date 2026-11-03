@@ -124,24 +124,26 @@ export function parseTagInput(value) {
   return { tags: uniqueTags(tags), ignored }
 }
 
-// Root and branch from one git call; outside a repository, (cwd, null). The branch is read from the
+// Root, branch and inRepo from one git call; outside a work tree, (cwd, null, false). The branch is read from the
 // HEAD file so an unborn branch keeps its name. git prints the physical root path.
 export async function locate(io, cwd) {
   let result
   try {
     result = await io.run(['git', '-C', cwd, 'rev-parse', '--show-toplevel', '--git-path', 'HEAD'], { cwd, timeoutMs: 2000 })
   } catch {
-    return { root: cwd, branch: null }
+    return { root: cwd, branch: null, inRepo: false }
   }
   const lines = result.exitCode === 0 ? result.stdout.trim().split('\n') : []
-  if (lines.length < 2) return { root: cwd, branch: null }
+  if (lines.length < 2) return { root: cwd, branch: null, inRepo: false }
   const headPath = lines[1].startsWith('/') ? lines[1] : `${cwd}/${lines[1]}`
   const head = ((await io.read(headPath)) ?? '').trim()
   const ref = /^ref: refs\/heads\/(.+)$/.exec(head)
-  return { root: lines[0], branch: ref ? ref[1] : null }
+  return { root: lines[0], branch: ref ? ref[1] : null, inRepo: true }
 }
 
-export function rootRefused(root) {
+// A work tree root is never inside .git; a worktree may sit under .claude/worktrees.
+export function rootRefused({ root, inRepo }) {
+  if (inRepo) return false
   const parts = root.split('/')
   return parts.includes('.git') || parts.includes('.claude')
 }
