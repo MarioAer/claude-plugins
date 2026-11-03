@@ -53,8 +53,8 @@ else:
 print(json.dumps(d))
 PY
 }
-typed() { event UserPromptExpansion "$1" todo:todo "$2" | bash "$HOOK"; }
-claude_add() { event PostToolUse "$1" todo:todo "$2" | bash "$HOOK"; }
+typed() { event UserPromptExpansion "$1" todo:capture "$2" | bash "$HOOK"; }
+claude_add() { event PostToolUse "$1" todo:capture "$2" | bash "$HOOK"; }
 ctx() { python3 -c 'import json,sys
 d = sys.stdin.read()
 print(json.loads(d)["hookSpecificOutput"]["additionalContext"] if d.strip() else "", end="")'; }
@@ -265,17 +265,17 @@ check "repository below a .claude parent adds" equals "${out%%:*}" "TODO_ADDED"
 # --- no output -----------------------------------------------------------------
 new_repo "$WORK/quiet"
 check "other skill name: no output" empty "$(event UserPromptExpansion "$WORK/quiet" other:skill x | bash "$HOOK")"
-check "PreToolUse: no output" empty "$(event PreToolUse "$WORK/quiet" todo:todo x | bash "$HOOK")"
-check "non-string args: no output" empty "$(event_json PostToolUse "$WORK/quiet" todo:todo '{"a": 1}' | bash "$HOOK")"
+check "PreToolUse: no output" empty "$(event PreToolUse "$WORK/quiet" todo:capture x | bash "$HOOK")"
+check "non-string args: no output" empty "$(event_json PostToolUse "$WORK/quiet" todo:capture '{"a": 1}' | bash "$HOOK")"
 check "empty args: no output" empty "$(typed "$WORK/quiet" "   ")"
 check "no todo folder after ignored input" lacks_path "$WORK/quiet/.todo"
-out=$(printf 'not json todo:todo' | bash "$HOOK")
+out=$(printf 'not json todo:capture' | bash "$HOOK")
 rc=$?
 check "malformed JSON: exit 0, no output" equals "$rc:$out" "0:"
 
 mkdir -p "$WORK/bin"
 for tool in cat dirname; do ln -s "$(command -v "$tool")" "$WORK/bin/$tool"; done
-input=$(event UserPromptExpansion "$WORK/quiet" todo:todo x)
+input=$(event UserPromptExpansion "$WORK/quiet" todo:capture x)
 out=$(printf '%s' "$input" | PATH="$WORK/bin" "$BASH" "$HOOK")
 rc=$?
 check "no python3 on PATH: exit 0, no output" equals "$rc:$out" "0:"

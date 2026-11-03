@@ -228,11 +228,11 @@ line two" >/dev/null
   check "newline collapsed" has_line .todo/todo.md "- [ ] line one line two ($TODAY, branch: main)"
 }
 
-# Model-invoked skill use needs Skill(todo:todo) approval; granted here as a user would.
+# Model-invoked skill use needs Skill(todo:capture) approval; granted here as a user would.
 S24() {
   new_repo "$WORK/s24"
   todo "Use the todo skill to record the item 'check flaky retry test'. Afterwards, create the file notes.txt containing hi." \
-    --allowedTools "Skill(todo:todo)" >/dev/null
+    --allowedTools "Skill(todo:capture)" >/dev/null
   check "todo item recorded" line_count .todo/todo.md "check flaky retry test" 1
   check "skill grant does not cover notes.txt" absent notes.txt
 }

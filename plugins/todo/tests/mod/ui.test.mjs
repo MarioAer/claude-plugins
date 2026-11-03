@@ -17,7 +17,7 @@ const read = (dir) => readFile(join(dir, '.todo/todo.md'), 'utf8')
 function session(dir, options = {}) {
   const $ = fakeDollar({ cwd: dir, ...options }); const { on, fire } = recorder(); register(on); return { $, fire }
 }
-const command = (args) => ({ command: 'todo:todo', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+const command = (args) => ({ command: 'todo:capture', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
 const band = { component: 'AbovePrompt', surface: 'terminal', requestId: 'band', props: {} }
 // Depth-first search of a rendered tree for the first element matching pred.
 export function find(node, pred) {

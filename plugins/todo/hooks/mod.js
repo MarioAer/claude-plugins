@@ -5,7 +5,7 @@
 import * as store from './store.js'
 import { localDate } from './io.js'
 
-const SKILL = 'todo:todo'
+const SKILL = 'todo:capture'
 const INSIDE = 'TODO_FAILED: the session directory is inside .git or .claude'
 
 // A bare /todo remembers the session's cwd; the next prompt typed by the person is the item.
@@ -457,7 +457,7 @@ async function submitPrompt($, e, next) {
 }
 
 export const register = (on) => {
-  on('command.run', { command: 'todo:todo' }, runCommand)
+  on('command.run', { command: 'todo:capture' }, runCommand)
   on('tool.call', { tool: 'Skill' }, callSkill)
   on('prompt.submit', submitPrompt)
   on('ui.render', { component: 'AbovePrompt' }, renderBand)

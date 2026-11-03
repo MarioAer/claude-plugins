@@ -21,7 +21,7 @@ function session(dir, options = {}) {
   register(on)
   return { $, fire }
 }
-const command = (args) => ({ command: 'todo:todo', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+const command = (args) => ({ command: 'todo:capture', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
 
 test('replyFor maps markers to the three replies', () => {
   assert.equal(replyFor('TODO_ADDED: x\nnote'), 'Added to todo list: x')
@@ -88,9 +88,9 @@ test('contextFor carries the marker, the reply and the data note', () => {
 
 test("Claude's add is answered with the Skill result shape, context and by: claude", async () => {
   const dir = await repo(); const { $, fire } = session(dir)
-  const { passed, out } = await fire($, 'tool.call', skillCall('todo:todo', 'check\r\nflaky retry'))
+  const { passed, out } = await fire($, 'tool.call', skillCall('todo:capture', 'check\r\nflaky retry'))
   assert.equal(passed, false)
-  assert.deepEqual(out.result, { success: true, commandName: 'todo:todo', status: 'inline' })
+  assert.deepEqual(out.result, { success: true, commandName: 'todo:capture', status: 'inline' })
   assert.equal(out.context.length, 1)
   assert.ok(out.context[0].startsWith('TODO_ADDED: check  flaky retry\n'))
   assert.match(await read(dir), new RegExp(`- \\[ \\] check  flaky retry \\(${TODAY}, branch: main, by: claude\\)\\n$`))
@@ -99,7 +99,7 @@ test("Claude's add is answered with the Skill result shape, context and by: clau
 
 test("Claude's refused add carries TODO_FAILED and writes nothing", async () => {
   const dir = await repo(); const { $, fire } = session(join(dir, '.git'))
-  const { out } = await fire($, 'tool.call', skillCall('todo:todo', 'x'))
+  const { out } = await fire($, 'tool.call', skillCall('todo:capture', 'x'))
   assert.ok(out.context[0].startsWith('TODO_FAILED: the session directory is inside .git or .claude\n'))
   await assert.rejects(read(join(dir, '.git')))
 })
@@ -107,9 +107,14 @@ test("Claude's refused add carries TODO_FAILED and writes nothing", async () => 
 test('other skills, list and review from the Skill tool pass through', async () => {
   const dir = await repo(); const { $, fire } = session(dir)
   assert.equal((await fire($, 'tool.call', skillCall('other:skill', 'x'))).passed, true)
-  assert.equal((await fire($, 'tool.call', skillCall('todo:todo', 'list'))).passed, true)
-  assert.equal((await fire($, 'tool.call', skillCall('todo:todo', 'review'))).passed, true)
+  assert.equal((await fire($, 'tool.call', skillCall('todo:capture', 'list'))).passed, true)
+  assert.equal((await fire($, 'tool.call', skillCall('todo:capture', 'review'))).passed, true)
   assert.equal((await fire($, 'tool.call', { tool: 'Read', tool_use_id: 't', file_path: 'a' })).passed, true)
+})
+
+test('the old skill id is not answered', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  assert.equal((await fire($, 'tool.call', skillCall('todo:todo', 'x'))).passed, true)
 })
 
 import { resetCapture } from '../../hooks/mod.js'
@@ -157,7 +162,7 @@ test('without a pending capture prompts pass through', async () => {
 
 test("a deny rule still blocks Claude's add: the mod passes a denied call through and writes nothing", async () => {
   const dir = await repo(); const { $, fire } = session(dir, { toolCheck: { decision: 'deny', reason: 'permissions.deny' } })
-  assert.equal((await fire($, 'tool.call', skillCall('todo:todo', 'blocked item'))).passed, true)
+  assert.equal((await fire($, 'tool.call', skillCall('todo:capture', 'blocked item'))).passed, true)
   await assert.rejects(read(dir))
   assert.deepEqual($.log.toasts, [])
 })
@@ -181,8 +186,8 @@ test('typed list #tag filters; an unknown tag is empty; list #a b is an add', as
 
 test("Claude's tagged add puts tags after by: claude; list #tag from the Skill tool passes through", async () => {
   const dir = await repo(); const { $, fire } = session(dir)
-  const { out } = await fire($, 'tool.call', skillCall('todo:todo', 'check retry #flaky'))
+  const { out } = await fire($, 'tool.call', skillCall('todo:capture', 'check retry #flaky'))
   assert.ok(out.context[0].startsWith('TODO_ADDED: check retry\n'))
   assert.match(await read(dir), new RegExp(`- \\[ \\] check retry \\(${TODAY}, branch: main, by: claude, tags: flaky\\)\\n$`))
-  assert.equal((await fire($, 'tool.call', skillCall('todo:todo', 'list #flaky'))).passed, true)
+  assert.equal((await fire($, 'tool.call', skillCall('todo:capture', 'list #flaky'))).passed, true)
 })

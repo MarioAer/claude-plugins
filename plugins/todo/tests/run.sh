@@ -85,7 +85,7 @@ out=$(printf '{"hook_event_name":"SessionStart","source":"startup"}' | bash "$SE
 rc=$?
 if [ "$rc" -eq 0 ] &&
   grep -q '"hookEventName": *"SessionStart"' <<<"$out" &&
-  grep -q 'todo:todo' <<<"$out" &&
+  grep -q 'todo:capture' <<<"$out" &&
   python3 -c 'import json,sys; json.loads(sys.argv[1])' "$out" 2>/dev/null; then
   echo "PASS session-start emits valid JSON context naming the skill"
   passed=$((passed + 1))
@@ -96,7 +96,7 @@ fi
 
 # Skill context budget: SKILL.md is injected on every invocation, including Claude's own adds,
 # so it holds only the decision logic; the fallback and review procedures live in files read on demand.
-SKILL_DIR="$ROOT/skills/todo"
+SKILL_DIR="$ROOT/skills/capture"
 SKILL_MAX_BYTES=4500
 DESCRIPTION_MAX_CHARS=250
 skill_bytes=$(wc -c <"$SKILL_DIR/SKILL.md" | tr -d ' ')

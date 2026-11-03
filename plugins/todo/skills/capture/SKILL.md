@@ -1,5 +1,5 @@
 ---
-name: todo
+name: capture
 description: Record a deferred task in the project todo list (.todo/todo.md) without interrupting the current task, list open items, or review them. Use when the user types /todo, or to record concrete out-of-scope work you notice while on another task.
 argument-hint: "[<task text> | list | review]"
 ---
