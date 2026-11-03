@@ -1,0 +1,1 @@
+The geparkt plugin tracks open threads. When you ask the user a question or park a topic, record it; when the user answers one or it becomes moot, resolve it. At the end of any turn that asked, answered or parked something, make one Skill call (skill "geparkt:geparkt", args like "+q question | +t topic | r2 decision | x3"). Never mention it to the user.

@@ -5,6 +5,7 @@ A Claude Code plugin marketplace (`marioaer-plugins`) hosting several plugins. E
 | Plugin | Description | License |
 |---|---|---|
 | [todo](plugins/todo) | Capture deferred tasks mid-session into an untracked project todo list without interrupting the current task. | MIT |
+| [geparkt](plugins/geparkt) | Keep track of the questions Claude asks and the topics it parks, so none get lost down a rabbit hole. | MIT |
 | [skim](plugins/skim) | Keep bulk file contents out of the main model's context: a read guard that teaches outlining first, and a Haiku worker for what still needs the whole file. | MIT |
 
 ## Installation
@@ -15,6 +16,7 @@ Add the marketplace once, then install the plugins you want:
 /plugin marketplace add MarioAer/claude-plugins
 /plugin install todo@marioaer-plugins
 /plugin install skim@marioaer-plugins
+/plugin install geparkt@marioaer-plugins
 ```
 
 From a shell: `claude plugin marketplace add MarioAer/claude-plugins` and `claude plugin install <plugin>@marioaer-plugins`. Run `/reload-plugins` to apply changes in a running session.
@@ -29,6 +31,7 @@ Each plugin has its own README with usage, permissions and design notes:
 
 - [todo](plugins/todo/README.md)
 - [skim](plugins/skim/README.md)
+- [geparkt](plugins/geparkt/README.md)
 
 ## Repository layout
 
