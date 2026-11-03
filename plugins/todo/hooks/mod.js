@@ -19,8 +19,10 @@ const CAPTURE_ORIGINS = new Set(['composer', 'sdk', 'bridge'])
 let capture = null
 // The fallback toast for a refused registration is shown once per mod load.
 let warned = false
+// Items added since the current turn started, for the line under its answer.
+let turnAdds = 0
 
-export function resetCapture() { capture = null; warned = false }
+export function resetCapture() { capture = null; warned = false; turnAdds = 0 }
 
 // What the band and the pane draw from. Written only from events, never while drawing.
 const BAND_MS = 10000
@@ -429,7 +431,9 @@ async function performAdd($, cwd, text, byClaude) {
   const { root, branch } = located
   if (store.rootRefused(located)) return { root, marker: INSIDE }
   try {
-    return { root, marker: await store.add(io, { root, branch, text, byClaude }) }
+    const marker = await store.add(io, { root, branch, text, byClaude })
+    if (marker.startsWith('TODO_ADDED: ')) turnAdds++
+    return { root, marker }
   } catch (error) {
     if (error instanceof store.Refused) return { root, marker: `TODO_FAILED: ${error.message}` }
     throw error
@@ -508,6 +512,25 @@ async function autocomplete($, e, next) {
   }
 }
 
+async function turnStart($, e, next) {
+  turnAdds = 0
+  return next(e)
+}
+
+// One line under an answer, only when the turn added items, so unchanged turns stay quiet.
+async function turnComplete($, e, next) {
+  if (turnAdds === 0) return next(e)
+  const added = turnAdds
+  turnAdds = 0
+  let open = ''
+  const io = modsIo($)
+  const located = await store.locate(io, await $.session.cwd())
+  if (!store.rootRefused(located)) {
+    try { open = ` · ${(await store.list(io, located.root)).length} open` } catch (error) { if (!(error instanceof store.Refused)) throw error }
+  }
+  return { text: `Todo: +${added} this turn${open}` }
+}
+
 // Registers the immediate /todo. A refusal (an older engine, or a name taken by another plugin)
 // leaves /todo:capture, which waits for the turn to end; one toast says so.
 async function startSession($, e, next) {
@@ -556,6 +579,8 @@ export const register = (on) => {
   on('tool.call', { tool: 'Skill' }, callSkill)
   on('prompt.submit', submitPrompt)
   on('prompt.autocomplete', autocomplete)
+  on('turn.start', turnStart)
+  on('turn.complete', turnComplete)
   on('ui.render', { component: 'AbovePrompt' }, renderBand)
   on('ui.render', { component: 'Pane', requestId: 'todo-review' }, renderPane)
   on('ui.close', { id: 'todo-review' }, closePane)

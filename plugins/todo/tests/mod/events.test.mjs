@@ -263,3 +263,34 @@ test('prompt.autocomplete passes through inside .git', async () => {
   const dir = await repo(); const { $, fire } = session(join(dir, '.git'))
   assert.equal((await fire($, 'prompt.autocomplete', { text: '/todo #', cursor: 7, token: '#', start: 6 })).passed, true)
 })
+
+const turn = { text: 'go', turnId: 't1' }
+const done = { reason: 'answer', turnId: 't1' }
+
+test('turn.complete shows one line after a turn that added items', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'turn.start', turn)
+  await fire($, 'command.run', typed('one'))
+  await fire($, 'tool.call', skillCall('todo:capture', 'two'))
+  const { passed, out } = await fire($, 'turn.complete', done)
+  assert.equal(passed, false)
+  assert.deepEqual(out, { text: 'Todo: +2 this turn · 2 open' })
+})
+
+test('turn.complete passes through when nothing was added', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', typed('before the turn'))
+  await fire($, 'turn.start', turn)
+  assert.equal((await fire($, 'turn.complete', done)).passed, true)
+})
+
+test('a duplicate add does not count for the turn line', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', typed('same'))
+  await fire($, 'turn.start', turn)
+  await fire($, 'command.run', typed('same'))
+  assert.equal((await fire($, 'turn.complete', done)).passed, true)
+})
