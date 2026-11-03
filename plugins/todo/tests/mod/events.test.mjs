@@ -274,8 +274,8 @@ test('turn.complete shows one line after a turn that added items', async () => {
   await fire($, 'command.run', typed('one'))
   await fire($, 'tool.call', skillCall('todo:capture', 'two'))
   const { passed, out } = await fire($, 'turn.complete', done)
-  assert.equal(passed, false)
-  assert.deepEqual(out, { text: 'Todo: +2 this turn · 2 open' })
+  assert.equal(passed, true, 'the hooks behind it and core still run')
+  assert.equal(out.text, 'Todo: +2 this turn · 2 open')
 })
 
 test('turn.complete passes through when nothing was added', async () => {
@@ -293,4 +293,28 @@ test('a duplicate add does not count for the turn line', async () => {
   await fire($, 'turn.start', turn)
   await fire($, 'command.run', typed('same'))
   assert.equal((await fire($, 'turn.complete', done)).passed, true)
+})
+
+test('a plugin-origin /todo:capture add answers the marker', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  const { out } = await fire($, 'command.run', { ...command('x'), origin: { kind: 'plugin' } })
+  assert.match(out.text, /^TODO_ADDED: x$/)
+})
+
+test('a subagent turn.complete passes through and keeps the count for the main turn', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'turn.start', turn)
+  await fire($, 'command.run', typed('one'))
+  assert.equal((await fire($, 'turn.complete', { ...done, agentId: 'a1' })).passed, true)
+  assert.equal((await fire($, 'turn.complete', { ...done, answer: 'A' })).out.text, 'Todo: +1 this turn · 1 open')
+})
+
+test('the turn line calls next and keeps a line another hook set', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire, on } = session(dir)
+  await fire($, 'turn.start', turn)
+  await fire($, 'command.run', typed('one'))
+  const out = (await fire($, 'turn.complete', { ...done, answer: 'A' }, { text: 'Other: line' })).out
+  assert.equal(out.text, 'Other: line\nTodo: +1 this turn · 1 open')
 })

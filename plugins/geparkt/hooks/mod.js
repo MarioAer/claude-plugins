@@ -132,13 +132,19 @@ async function turnStart($, e, next) {
   return next(e)
 }
 
-// One line under an answer, only when the turn changed the number of open threads.
+// One line under an answer, only when the turn changed the number of open threads. A subagent's
+// turn ends without a turn.start of its own and leaves the count to the main turn. next(e)
+// resolves to the answer, or to a line another mod set, which is kept above this one.
 async function turnComplete($, e, next) {
+  if (e.agentId !== undefined) return next(e)
   const open = (await getView($)).threads.length
   const delta = open - openAtStart
   openAtStart = open
   if (delta === 0) return next(e)
-  return { text: `Geparkt: ${open} open (${delta > 0 ? '+' : ''}${delta})` }
+  const result = await next(e)
+  const line = `Geparkt: ${open} open (${delta > 0 ? '+' : ''}${delta})`
+  const set = result.text !== undefined && result.text !== e.answer ? result.text : null
+  return { ...result, text: set === null ? line : `${set}\n${line}` }
 }
 
 export function listText(threads, now) {

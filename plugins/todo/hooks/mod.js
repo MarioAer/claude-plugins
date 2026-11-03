@@ -1,5 +1,5 @@
 // Todo mod: answers typed /todo commands and Claude's own Skill call inside Claude Code, and
-// draws a toast, a transient band and a review pane. Loads on Claude Code 2.1.287 or later; where it
+// draws a toast, a transient band and a review pane. Loads on Claude Code 2.1.292 or later; where it
 // does not load, hooks/todo_hook.py and the skill behave as in 0.2.1. Item text never reaches a
 // shell: subprocesses take argument vectors and the text is never one of them.
 import * as store from './store.js'
@@ -484,7 +484,7 @@ async function runCommand($, e, next) {
   const kind = e.origin?.kind
   if (kind !== 'plugin') $.ui.toast(line)
   await showBand($, root)
-  if (e.command !== COMMAND) return { text: line }
+  if (e.command !== COMMAND && kind !== 'plugin') return { text: line }
   return answerAdd(marker, kind, (await $.session.surfaces()).length > 0)
 }
 
@@ -517,9 +517,18 @@ async function turnStart($, e, next) {
   return next(e)
 }
 
-// One line under an answer, only when the turn added items, so unchanged turns stay quiet.
+// The line beneath an answer, after the hooks behind this one: next(e) resolves to the answer, or
+// to a line another mod set, which is kept above this one.
+export function withLine(result, answer, line) {
+  const set = result.text !== undefined && result.text !== answer ? result.text : null
+  return { ...result, text: set === null ? line : `${set}\n${line}` }
+}
+
+// One line under an answer, only when the turn added items, so unchanged turns stay quiet. A
+// subagent's turn ends without a turn.start of its own and leaves the count to the main turn.
 async function turnComplete($, e, next) {
-  if (turnAdds === 0) return next(e)
+  if (e.agentId !== undefined || turnAdds === 0) return next(e)
+  const result = await next(e)
   const added = turnAdds
   turnAdds = 0
   let open = ''
@@ -528,7 +537,7 @@ async function turnComplete($, e, next) {
   if (!store.rootRefused(located)) {
     try { open = ` · ${(await store.list(io, located.root)).length} open` } catch (error) { if (!(error instanceof store.Refused)) throw error }
   }
-  return { text: `Todo: +${added} this turn${open}` }
+  return withLine(result, e.answer, `Todo: +${added} this turn${open}`)
 }
 
 // Registers the immediate /todo. A refusal (an older engine, or a name taken by another plugin)

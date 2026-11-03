@@ -52,7 +52,7 @@ On Claude Code before 2.1.287, with `--safe-mode`, `disableAllHooks` or wherever
 
 - The mod and the hook write only `<root>/.geparkt/` (the session's file and `.gitignore`), refuse symlinks there and session ids that are not plain names, and run only `git rev-parse` with fixed arguments. Thread text is never a subprocess argument.
 - The mod answers Claude's own `Skill(geparkt:track)` call itself, only when the engine's permission decision is allow: an `ask` or `deny` rule on `Skill(geparkt:track)` goes to the engine, which prompts or refuses (the fallback hook then records an allowed call, and the band is redrawn from the file after it). No other tool call is answered or approved.
-- Deferring to todo runs `/todo` (or `/todo:capture` where `/todo` is not registered) through Claude Code's command API, only after the second `f`, and only when one of them exists. The thread is marked deferred only when todo answers with its `TODO_ADDED` or `TODO_DUPLICATE` marker (todo 0.7 or later); anything else leaves it open and names the failure in a toast.
+- Deferring to todo runs `/todo` (or `/todo:capture` where `/todo` is not registered) through Claude Code's command API, only after the second `f`, and only when one of them exists. The thread is marked deferred only when todo answers with its `TODO_ADDED` or `TODO_DUPLICATE` marker (todo 0.7 or later); anything else leaves it open and names the failure in a toast. Claude Code runs a command started through this API once the session is idle, so a second `f` pressed mid-turn takes effect when the turn ends, and todo's marker line (`TODO_ADDED: …`) then shows in the transcript.
 
 ## License
 

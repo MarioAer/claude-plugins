@@ -259,7 +259,7 @@ S28() {
   check "item carries by: claude" has_line .todo/todo.md "- [ ] self initiated item ($TODAY, branch: main, by: claude)"
 }
 
-# --- Mod (Claude Code 2.1.287 or later) ---
+# --- Mod (Claude Code 2.1.292 or later) ---
 
 S29() {
   new_repo "$WORK/s29"

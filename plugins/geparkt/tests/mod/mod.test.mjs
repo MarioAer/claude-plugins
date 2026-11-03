@@ -339,7 +339,7 @@ test('turn.complete shows the open count when the turn added a thread', async ()
   const dir = await repo(); const { $, fire } = session(dir)
   await fire($, 'turn.start', turn)
   await fire($, 'tool.call', skill('+q A?'))
-  assert.deepEqual((await fire($, 'turn.complete', done)).out, { text: 'Geparkt: 1 open (+1)' })
+  assert.equal((await fire($, 'turn.complete', done)).out.text, 'Geparkt: 1 open (+1)')
 })
 
 test('turn.complete shows a negative change when a thread was resolved', async () => {
@@ -347,7 +347,7 @@ test('turn.complete shows a negative change when a thread was resolved', async (
   await fire($, 'tool.call', skill('+q A? | +q B?'))
   await fire($, 'turn.start', turn)
   await fire($, 'tool.call', skill('r1 yes'))
-  assert.deepEqual((await fire($, 'turn.complete', done)).out, { text: 'Geparkt: 1 open (-1)' })
+  assert.equal((await fire($, 'turn.complete', done)).out.text, 'Geparkt: 1 open (-1)')
 })
 
 test('turn.complete passes through when the open count did not change', async () => {
@@ -355,4 +355,19 @@ test('turn.complete passes through when the open count did not change', async ()
   await fire($, 'tool.call', skill('+q A?'))
   await fire($, 'turn.start', turn)
   assert.equal((await fire($, 'turn.complete', done)).passed, true)
+})
+
+test('a subagent turn.complete passes through for geparkt', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'turn.start', turn)
+  await fire($, 'tool.call', skill('+q A?'))
+  assert.equal((await fire($, 'turn.complete', { ...done, agentId: 'a1' })).passed, true)
+  assert.equal((await fire($, 'turn.complete', { ...done, answer: 'A' })).out.text, 'Geparkt: 1 open (+1)')
+})
+
+test('the geparkt turn line keeps a line another hook set', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'turn.start', turn)
+  await fire($, 'tool.call', skill('+q A?'))
+  assert.equal((await fire($, 'turn.complete', { ...done, answer: 'A' }, { text: 'Todo: +1 this turn' })).out.text, 'Todo: +1 this turn\nGeparkt: 1 open (+1)')
 })

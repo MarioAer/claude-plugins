@@ -9,13 +9,14 @@ export function recorder() {
     hooks.push({ event, matcher, handler })
     return { catch() {} }
   }
-  // Runs the registered hooks for event in order; next() past the last one stands for core.
-  async function fire($, event, e) {
+  // Runs the registered hooks for event in order; next() past the last one stands for core, whose
+  // result fields can be given as core.
+  async function fire($, event, e, core = {}) {
     const chain = hooks.filter((h) => h.event === event && Object.entries(h.matcher).every(([k, v]) => e[k] === v))
     let index = 0
     const next = async (input) => {
       const hook = chain[index++]
-      if (!hook) return { [PASSED]: true, ...input }
+      if (!hook) return { [PASSED]: true, ...input, ...core }
       return hook.handler($, input, next)
     }
     const out = await next(e)

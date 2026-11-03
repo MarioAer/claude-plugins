@@ -42,7 +42,7 @@ Item format:
 
 ## Mod
 
-On Claude Code 2.1.287 or later the plugin also loads a mod (`hooks/mod.js`, a hooks module that runs inside Claude Code). With it:
+On Claude Code 2.1.292 or later the plugin also loads a mod (`hooks/mod.js`, a hooks module that runs inside Claude Code; 2.1.287 to 2.1.291 refuse the whole module because it completes `#tags` through `prompt.autocomplete`, which they lack). With it:
 
 - The mod registers `/todo` as an immediate command, so a typed `/todo <text>` is recorded at once, even while Claude is mid-turn; the toast is the only confirmation and nothing enters the transcript. Headless runs, where no toast is drawn, print the reply line instead. Where the engine refuses the registration (older versions, or another plugin owns `/todo`), one toast says so and `/todo:capture` works as before but waits for the turn to end.
 - A typed `/todo <text>`, `/todo list` and `/todo review` are answered by the mod: no model turn starts and no skill text is loaded, so they cost no tokens. A bare `/todo` opens a one-line `Add to todo` input above the prompt (Enter adds, empty Enter or Esc cancels), so a message you type to Claude is never taken as the item; in headless runs it prints the question and takes your next prompt as the item, also without a turn.
