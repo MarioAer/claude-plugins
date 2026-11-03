@@ -331,3 +331,28 @@ test('pane: a todo failure is named in a toast and leaves the thread open', asyn
   assert.equal((await fileOf(dir)).threads[0].status, 'open')
   assert.ok($.log.toasts.some((t) => /x is a symlink/.test(t)))
 })
+
+const turn = { text: 'go', turnId: 't1' }
+const done = { reason: 'answer', turnId: 't1' }
+
+test('turn.complete shows the open count when the turn added a thread', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'turn.start', turn)
+  await fire($, 'tool.call', skill('+q A?'))
+  assert.deepEqual((await fire($, 'turn.complete', done)).out, { text: 'Geparkt: 1 open (+1)' })
+})
+
+test('turn.complete shows a negative change when a thread was resolved', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'tool.call', skill('+q A? | +q B?'))
+  await fire($, 'turn.start', turn)
+  await fire($, 'tool.call', skill('r1 yes'))
+  assert.deepEqual((await fire($, 'turn.complete', done)).out, { text: 'Geparkt: 1 open (-1)' })
+})
+
+test('turn.complete passes through when the open count did not change', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'tool.call', skill('+q A?'))
+  await fire($, 'turn.start', turn)
+  assert.equal((await fire($, 'turn.complete', done)).passed, true)
+})

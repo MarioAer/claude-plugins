@@ -124,6 +124,23 @@ async function callSkill($, e, next) {
   return { result: { success: true, commandName: SKILL, status: 'inline' }, context: [store.contextFor(marker)] }
 }
 
+// The open count when the current turn started, for the line under its answer.
+let openAtStart = 0
+
+async function turnStart($, e, next) {
+  openAtStart = (await getView($)).threads.length
+  return next(e)
+}
+
+// One line under an answer, only when the turn changed the number of open threads.
+async function turnComplete($, e, next) {
+  const open = (await getView($)).threads.length
+  const delta = open - openAtStart
+  openAtStart = open
+  if (delta === 0) return next(e)
+  return { text: `Geparkt: ${open} open (${delta > 0 ? '+' : ''}${delta})` }
+}
+
 export function listText(threads, now) {
   if (threads.length === 0) return 'No open threads.'
   return threads.map((t) => `#${t.id} ${store.KINDS[t.kind]} · ${store.age(t, now)} · ${t.text}`).join('\n')
@@ -352,6 +369,8 @@ export const register = (on) => {
   on('tool.call', { tool: 'Skill' }, callSkill)
   on('command.run', { command: SKILL }, runCommand)
   on('command.run', { command: COMMAND }, runCommand)
+  on('turn.start', turnStart)
+  on('turn.complete', turnComplete)
   on('ui.render', { component: 'AbovePrompt' }, renderBand)
   on('ui.render', { component: 'Pane', requestId: 'geparkt-review' }, renderPane)
   on('ui.close', { id: 'geparkt-review' }, closePane)

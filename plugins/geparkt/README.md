@@ -23,6 +23,7 @@ Keeps track of the questions Claude asks and the topics it parks. Claude asks th
 | | |
 |---|---|
 | Band | `Geparkt: 3 open · 2 questions · 1 stale` above the prompt while any thread is open; `p` opens the review. A thread untouched for an hour is stale. |
+| Turn line | `Geparkt: 3 open (+1)` under an answer, only when that turn changed the number of open threads. |
 | `/geparkt` | Opens the review pane; without a pane surface (headless, SDK) it prints the open threads. |
 | `/geparkt list` | Prints the open threads. |
 
