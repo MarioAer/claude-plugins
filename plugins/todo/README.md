@@ -15,7 +15,7 @@ Records tasks you want to defer while Claude Code keeps working on the current t
 
 | Command | Action |
 |---|---|
-| `/todo <text>` | Add an item, confirm in one line, resume the current task. Trailing `#tags` (letters, digits, `-`, `_`, up to 8) are stored as tags. |
+| `/todo <text>` | Add an item, also while Claude is working, and confirm with a toast; Claude's turn continues untouched. Trailing `#tags` (letters, digits, `-`, `_`, up to 8) are stored as tags. |
 | `/todo` | Ask once for the text, then add it. |
 | `/todo list` | Show open items as a numbered list. |
 | `/todo list #<tag>` | Show only the open items carrying that tag. |
@@ -43,6 +43,7 @@ Item format:
 
 On Claude Code 2.1.287 or later the plugin also loads a mod (`hooks/mod.js`, a hooks module that runs inside Claude Code). With it:
 
+- The mod registers `/todo` as an immediate command, so a typed `/todo <text>` is recorded at once, even while Claude is mid-turn; the toast is the only confirmation and nothing enters the transcript. Headless runs, where no toast is drawn, print the reply line instead. Where the engine refuses the registration (older versions, or another plugin owns `/todo`), one toast says so and `/todo:capture` works as before but waits for the turn to end.
 - A typed `/todo <text>`, `/todo list` and `/todo review` are answered by the mod: no model turn starts and no skill text is loaded, so they cost no tokens. A bare `/todo` prints the question and takes your next prompt as the item, also without a turn.
 - Claude's own `Skill(todo:capture)` call is answered by the mod: the item is recorded, Claude reads one context line instead of the skill text, and confirms in one line (about 30 tokens).
 - Every add, duplicate or failure shows a toast. A band above the prompt shows `Todo: N open` for ten seconds after any todo call and while review is open; it is never shown otherwise.

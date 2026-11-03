@@ -191,3 +191,51 @@ test("Claude's tagged add puts tags after by: claude; list #tag from the Skill t
   assert.match(await read(dir), new RegExp(`- \\[ \\] check retry \\(${TODAY}, branch: main, by: claude, tags: flaky\\)\\n$`))
   assert.equal((await fire($, 'tool.call', skillCall('todo:capture', 'list #flaky'))).passed, true)
 })
+
+const typed = (args, origin = 'composer') => ({ command: 'todo', args, origin: { kind: origin }, presentation: { isFullscreen: false, columns: 80 } })
+
+test('session.start registers /todo as immediate', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  const { passed } = await fire($, 'session.start', {})
+  assert.equal(passed, true)
+  assert.equal($.log.registered.length, 1)
+  const [spec] = $.log.registered
+  assert.ok(spec.description.length > 0)
+  assert.deepEqual({ ...spec, description: 'x' }, { name: 'todo', description: 'x', argumentHint: '[<task text> | list | review]', immediate: true })
+})
+
+test('a refused registration toasts once and session.start still passes on', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir, { registerThrows: true })
+  assert.equal((await fire($, 'session.start', {})).passed, true)
+  assert.equal((await fire($, 'session.start', {})).passed, true)
+  assert.equal($.log.toasts.length, 1)
+  assert.match($.log.toasts[0], /use \/todo:capture/)
+})
+
+test('typed /todo add with a surface answers {} and toasts', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  const { passed, out } = await fire($, 'command.run', typed('fix it'))
+  assert.equal(passed, false)
+  assert.deepEqual(out, {})
+  assert.deepEqual($.log.toasts, ['Added to todo list: fix it'])
+  assert.match(await read(dir), /- \[ \] fix it \(/)
+})
+
+test('headless add answers the reply line', async () => {
+  const dir = await repo(); const { $, fire } = session(dir, { surfaces: [] })
+  assert.equal((await fire($, 'command.run', typed('x'))).out.text, 'Added to todo list: x')
+})
+
+test('plugin-origin add answers the marker and does not toast', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  const { out } = await fire($, 'command.run', typed('x', 'plugin'))
+  assert.match(out.text, /^TODO_ADDED: x$/)
+  assert.deepEqual($.log.toasts, [])
+})
+
+test('/todo list keeps its text answer', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  assert.equal((await fire($, 'command.run', typed('list'))).out.text, 'Todo list is empty.')
+})

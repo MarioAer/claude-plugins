@@ -8,12 +8,19 @@ import { localDate } from './io.js'
 const SKILL = 'todo:capture'
 const INSIDE = 'TODO_FAILED: the session directory is inside .git or .claude'
 
+// The mod's own /todo, registered as immediate so it runs while Claude is mid-turn. A skill may
+// not share a registered command's name, which is why the skill is named capture.
+const COMMAND = 'todo'
+const ARGUMENT_HINT = '[<task text> | list | review]'
+
 // A bare /todo remembers the session's cwd; the next prompt typed by the person is the item.
 const CAPTURE_MS = 10 * 60 * 1000
 const CAPTURE_ORIGINS = new Set(['composer', 'sdk', 'bridge'])
 let capture = null
+// The fallback toast for a refused registration is shown once per mod load.
+let warned = false
 
-export function resetCapture() { capture = null }
+export function resetCapture() { capture = null; warned = false }
 
 // What the band and the pane draw from. Written only from events, never while drawing.
 const BAND_MS = 10000
@@ -364,6 +371,15 @@ export function replyFor(marker) {
   return `Todo failed: ${first.replace(/^TODO_FAILED: /, '')}`
 }
 
+// The answer to a typed /todo add. Another plugin's $.command.run reads the marker; headless runs
+// draw no toast, so they get the reply line; otherwise the toast is the only output, so a mid-turn
+// add puts nothing into the transcript.
+export function answerAdd(marker, originKind, hasSurface) {
+  if (originKind === 'plugin') return { text: marker.split('\n')[0] }
+  if (!hasSurface) return { text: replyFor(marker) }
+  return {}
+}
+
 // What Claude reads after its own Skill call instead of the skill body: the marker SKILL.md
 // section 0 documents, the one-line reply to give, and the data note.
 export function contextFor(marker) {
@@ -422,9 +438,23 @@ async function runCommand($, e, next) {
   }
   const { root, marker } = await performAdd($, cwd, text, false)
   const line = replyFor(marker)
-  $.ui.toast(line)
+  const kind = e.origin?.kind
+  if (kind !== 'plugin') $.ui.toast(line)
   await showBand($, root)
-  return { text: line }
+  if (e.command !== COMMAND) return { text: line }
+  return answerAdd(marker, kind, (await $.session.surfaces()).length > 0)
+}
+
+// Registers the immediate /todo. A refusal (an older engine, or a name taken by another plugin)
+// leaves /todo:capture, which waits for the turn to end; one toast says so.
+async function startSession($, e, next) {
+  try {
+    await $.command.register({ name: COMMAND, description: 'Add to the todo list, also while Claude is working', argumentHint: ARGUMENT_HINT, immediate: true })
+  } catch {
+    if (!warned) $.ui.toast('Mid-turn /todo is unavailable here; use /todo:capture')
+    warned = true
+  }
+  return next(e)
 }
 
 async function callSkill($, e, next) {
@@ -457,7 +487,9 @@ async function submitPrompt($, e, next) {
 }
 
 export const register = (on) => {
-  on('command.run', { command: 'todo:capture' }, runCommand)
+  on('session.start', startSession)
+  on('command.run', { command: SKILL }, runCommand)
+  on('command.run', { command: COMMAND }, runCommand)
   on('tool.call', { tool: 'Skill' }, callSkill)
   on('prompt.submit', submitPrompt)
   on('ui.render', { component: 'AbovePrompt' }, renderBand)

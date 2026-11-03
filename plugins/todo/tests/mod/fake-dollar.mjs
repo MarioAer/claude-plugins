@@ -24,14 +24,21 @@ export function recorder() {
   return { on, fire }
 }
 
-export function fakeDollar({ cwd, surfaces = ['terminal'], today, toolCheck = { decision: 'allow' } } = {}) {
+export function fakeDollar({ cwd, surfaces = ['terminal'], today, toolCheck = { decision: 'allow' }, registerThrows = false } = {}) {
   const base = nodeIo({ today })
   const state = new Map()
-  const log = { toasts: [], opened: [], closed: [], invalidations: 0, timers: [] }
+  const log = { toasts: [], opened: [], closed: [], invalidations: 0, timers: [], registered: [] }
   const element = (type) => (props) => ({ type, ...props })
   return {
     log,
     plugin: { name: 'todo', root: '/plugin' },
+    command: {
+      register: async (spec) => {
+        if (registerThrows) throw new Error(`"/${spec.name}" refused: it is the plugin's /todo:capture`)
+        log.registered.push(spec)
+        return { command: spec.name }
+      },
+    },
     session: { cwd: async () => cwd, surfaces: async () => surfaces },
     fs: {
       read: async (path) => { const text = await base.read(path); if (text === null) throw new Error('ENOENT'); return text },

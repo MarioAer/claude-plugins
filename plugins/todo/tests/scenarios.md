@@ -50,3 +50,4 @@ Scenarios for `plugins/todo/skills/capture/SKILL.md`. Rows marked `e2e` run head
 | S35 | e2e | Mod loaded, one tagged and one untagged item | `/todo list #auth` | No model turn; only the tagged item is listed |
 | S36 | e2e | Hooks disabled, fallback tools approved | `/todo fallback tagged #ops` | The skill's fallback stores `, tags: ops` |
 | S37 | manual | Interactive terminal, items with two tags and one without | `/todo review`; `t`, type `docs`, Enter | Pane shows one heading per tag in its own colour, untagged last; the item moves under `#docs` with the cursor on it; `list #docs` then shows it |
+| S38 | manual | Interactive terminal, mod loaded | Ask Claude for a slow task (`sleep 30` through Bash); while it runs, type `/todo mid-turn check` | Toast `Added to todo list: mid-turn check` before the turn ends; the item is in `.todo/todo.md`; Claude's turn continues and its transcript shows no todo output |
