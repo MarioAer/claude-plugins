@@ -5,7 +5,7 @@
 dir=$(dirname "$0")
 input=$(cat)
 case "$input" in
-*'"SessionStart"'* | *geparkt:geparkt* | *'"geparkt"'*) ;;
+*'"SessionStart"'* | *geparkt:track* | *'"geparkt"'*) ;;
 *) exit 0 ;;
 esac
 if ! command -v python3 >/dev/null 2>&1; then

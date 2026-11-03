@@ -21,7 +21,7 @@ function session(dir, options = {}) {
   register(on)
   return { $, fire }
 }
-const command = (args) => ({ command: 'todo:todo', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+const command = (args) => ({ command: 'todo:capture', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
 
 test('replyFor maps markers to the three replies', () => {
   assert.equal(replyFor('TODO_ADDED: x\nnote'), 'Added to todo list: x')
@@ -88,9 +88,9 @@ test('contextFor carries the marker, the reply and the data note', () => {
 
 test("Claude's add is answered with the Skill result shape, context and by: claude", async () => {
   const dir = await repo(); const { $, fire } = session(dir)
-  const { passed, out } = await fire($, 'tool.call', skillCall('todo:todo', 'check\r\nflaky retry'))
+  const { passed, out } = await fire($, 'tool.call', skillCall('todo:capture', 'check\r\nflaky retry'))
   assert.equal(passed, false)
-  assert.deepEqual(out.result, { success: true, commandName: 'todo:todo', status: 'inline' })
+  assert.deepEqual(out.result, { success: true, commandName: 'todo:capture', status: 'inline' })
   assert.equal(out.context.length, 1)
   assert.ok(out.context[0].startsWith('TODO_ADDED: check  flaky retry\n'))
   assert.match(await read(dir), new RegExp(`- \\[ \\] check  flaky retry \\(${TODAY}, branch: main, by: claude\\)\\n$`))
@@ -99,7 +99,7 @@ test("Claude's add is answered with the Skill result shape, context and by: clau
 
 test("Claude's refused add carries TODO_FAILED and writes nothing", async () => {
   const dir = await repo(); const { $, fire } = session(join(dir, '.git'))
-  const { out } = await fire($, 'tool.call', skillCall('todo:todo', 'x'))
+  const { out } = await fire($, 'tool.call', skillCall('todo:capture', 'x'))
   assert.ok(out.context[0].startsWith('TODO_FAILED: the session directory is inside .git or .claude\n'))
   await assert.rejects(read(join(dir, '.git')))
 })
@@ -107,18 +107,23 @@ test("Claude's refused add carries TODO_FAILED and writes nothing", async () => 
 test('other skills, list and review from the Skill tool pass through', async () => {
   const dir = await repo(); const { $, fire } = session(dir)
   assert.equal((await fire($, 'tool.call', skillCall('other:skill', 'x'))).passed, true)
-  assert.equal((await fire($, 'tool.call', skillCall('todo:todo', 'list'))).passed, true)
-  assert.equal((await fire($, 'tool.call', skillCall('todo:todo', 'review'))).passed, true)
+  assert.equal((await fire($, 'tool.call', skillCall('todo:capture', 'list'))).passed, true)
+  assert.equal((await fire($, 'tool.call', skillCall('todo:capture', 'review'))).passed, true)
   assert.equal((await fire($, 'tool.call', { tool: 'Read', tool_use_id: 't', file_path: 'a' })).passed, true)
+})
+
+test('the old skill id is not answered', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  assert.equal((await fire($, 'tool.call', skillCall('todo:todo', 'x'))).passed, true)
 })
 
 import { resetCapture } from '../../hooks/mod.js'
 
 const prompt = (text, kind = 'composer') => ({ text, wait: false, origin: { kind } })
 
-test('bare /todo asks, then the next prompt is captured and dropped', async () => {
+test('headless bare /todo asks, then the next prompt is captured and dropped', async () => {
   resetCapture()
-  const dir = await repo(); const { $, fire } = session(dir)
+  const dir = await repo(); const { $, fire } = session(dir, { surfaces: [] })
   assert.equal((await fire($, 'command.run', command(''))).out.text, 'What should go on the todo list?')
   const { passed, out } = await fire($, 'prompt.submit', prompt('captured item'))
   assert.equal(passed, false)
@@ -130,7 +135,7 @@ test('bare /todo asks, then the next prompt is captured and dropped', async () =
 test('a slash command or a blank prompt from the user cancels the capture', async () => {
   for (const text of ['/help', '   ']) {
     resetCapture()
-    const dir = await repo(); const { $, fire } = session(dir)
+    const dir = await repo(); const { $, fire } = session(dir, { surfaces: [] })
     await fire($, 'command.run', command('   '))
     assert.equal((await fire($, 'prompt.submit', prompt(text))).passed, true, JSON.stringify(text))
     assert.equal((await fire($, 'prompt.submit', prompt('later text'))).passed, true, 'capture cleared')
@@ -140,7 +145,7 @@ test('a slash command or a blank prompt from the user cancels the capture', asyn
 
 test('a prompt from a non-user origin passes by and leaves the capture pending', async () => {
   resetCapture()
-  const dir = await repo(); const { $, fire } = session(dir)
+  const dir = await repo(); const { $, fire } = session(dir, { surfaces: [] })
   await fire($, 'command.run', command(''))
   assert.equal((await fire($, 'prompt.submit', prompt('from a task', 'task-notification'))).passed, true)
   await assert.rejects(read(dir), 'the notification is not an item')
@@ -157,7 +162,7 @@ test('without a pending capture prompts pass through', async () => {
 
 test("a deny rule still blocks Claude's add: the mod passes a denied call through and writes nothing", async () => {
   const dir = await repo(); const { $, fire } = session(dir, { toolCheck: { decision: 'deny', reason: 'permissions.deny' } })
-  assert.equal((await fire($, 'tool.call', skillCall('todo:todo', 'blocked item'))).passed, true)
+  assert.equal((await fire($, 'tool.call', skillCall('todo:capture', 'blocked item'))).passed, true)
   await assert.rejects(read(dir))
   assert.deepEqual($.log.toasts, [])
 })
@@ -181,8 +186,135 @@ test('typed list #tag filters; an unknown tag is empty; list #a b is an add', as
 
 test("Claude's tagged add puts tags after by: claude; list #tag from the Skill tool passes through", async () => {
   const dir = await repo(); const { $, fire } = session(dir)
-  const { out } = await fire($, 'tool.call', skillCall('todo:todo', 'check retry #flaky'))
+  const { out } = await fire($, 'tool.call', skillCall('todo:capture', 'check retry #flaky'))
   assert.ok(out.context[0].startsWith('TODO_ADDED: check retry\n'))
   assert.match(await read(dir), new RegExp(`- \\[ \\] check retry \\(${TODAY}, branch: main, by: claude, tags: flaky\\)\\n$`))
-  assert.equal((await fire($, 'tool.call', skillCall('todo:todo', 'list #flaky'))).passed, true)
+  assert.equal((await fire($, 'tool.call', skillCall('todo:capture', 'list #flaky'))).passed, true)
+})
+
+const typed = (args, origin = 'composer') => ({ command: 'todo', args, origin: { kind: origin }, presentation: { isFullscreen: false, columns: 80 } })
+
+test('session.start registers /todo as immediate', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  const { passed } = await fire($, 'session.start', {})
+  assert.equal(passed, true)
+  assert.equal($.log.registered.length, 1)
+  const [spec] = $.log.registered
+  assert.ok(spec.description.length > 0)
+  assert.deepEqual({ ...spec, description: 'x' }, { name: 'todo', description: 'x', argumentHint: '[<task text> | list | review]', immediate: true })
+})
+
+test('a refused registration toasts once and session.start still passes on', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir, { registerThrows: true })
+  assert.equal((await fire($, 'session.start', {})).passed, true)
+  assert.equal((await fire($, 'session.start', {})).passed, true)
+  assert.equal($.log.toasts.length, 1)
+  assert.match($.log.toasts[0], /use \/todo:capture/)
+})
+
+test('typed /todo add with a surface answers {} and toasts', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  const { passed, out } = await fire($, 'command.run', typed('fix it'))
+  assert.equal(passed, false)
+  assert.deepEqual(out, {})
+  assert.deepEqual($.log.toasts, ['Added to todo list: fix it'])
+  assert.match(await read(dir), /- \[ \] fix it \(/)
+})
+
+test('headless add answers the reply line', async () => {
+  const dir = await repo(); const { $, fire } = session(dir, { surfaces: [] })
+  assert.equal((await fire($, 'command.run', typed('x'))).out.text, 'Added to todo list: x')
+})
+
+test('plugin-origin add answers the marker and does not toast', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  const { out } = await fire($, 'command.run', typed('x', 'plugin'))
+  assert.match(out.text, /^TODO_ADDED: x$/)
+  assert.deepEqual($.log.toasts, [])
+})
+
+test('/todo list keeps its text answer', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  assert.equal((await fire($, 'command.run', typed('list'))).out.text, 'Todo list is empty.')
+})
+
+import { tagSuggestions } from '../../hooks/mod.js'
+
+test('tagSuggestions completes a #prefix after /todo only', () => {
+  assert.deepEqual(tagSuggestions('/todo fix #fl', '#fl', ['flaky', 'auth']), [{ text: '#flaky', label: '#flaky' }])
+  assert.deepEqual(tagSuggestions('/todo:capture fix #a', '#a', ['flaky', 'auth']), [{ text: '#auth', label: '#auth' }])
+  assert.deepEqual(tagSuggestions('fix #fl', '#fl', ['flaky']), [])
+  assert.deepEqual(tagSuggestions('/todo fix fl', 'fl', ['flaky']), [])
+  assert.equal(tagSuggestions('/todo x #', '#', ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']).length, 8)
+})
+
+test('prompt.autocomplete suggests known tags and passes other input through', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('tagged #auth'))
+  const { passed, out } = await fire($, 'prompt.autocomplete', { text: '/todo y #a', cursor: 10, token: '#a', start: 8 })
+  assert.equal(passed, false)
+  assert.deepEqual(out, { suggestions: [{ text: '#auth', label: '#auth' }] })
+  assert.equal((await fire($, 'prompt.autocomplete', { text: 'hello #a', cursor: 8, token: '#a', start: 6 })).passed, true)
+})
+
+test('prompt.autocomplete passes through inside .git', async () => {
+  const dir = await repo(); const { $, fire } = session(join(dir, '.git'))
+  assert.equal((await fire($, 'prompt.autocomplete', { text: '/todo #', cursor: 7, token: '#', start: 6 })).passed, true)
+})
+
+const turn = { text: 'go', turnId: 't1' }
+const done = { reason: 'answer', turnId: 't1' }
+
+test('turn.complete shows one line after a turn that added items', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'turn.start', turn)
+  await fire($, 'command.run', typed('one'))
+  await fire($, 'tool.call', skillCall('todo:capture', 'two'))
+  const { passed, out } = await fire($, 'turn.complete', done)
+  assert.equal(passed, true, 'the hooks behind it and core still run')
+  assert.equal(out.text, 'Todo: +2 this turn · 2 open')
+})
+
+test('turn.complete passes through when nothing was added', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', typed('before the turn'))
+  await fire($, 'turn.start', turn)
+  assert.equal((await fire($, 'turn.complete', done)).passed, true)
+})
+
+test('a duplicate add does not count for the turn line', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', typed('same'))
+  await fire($, 'turn.start', turn)
+  await fire($, 'command.run', typed('same'))
+  assert.equal((await fire($, 'turn.complete', done)).passed, true)
+})
+
+test('a plugin-origin /todo:capture add answers the marker', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  const { out } = await fire($, 'command.run', { ...command('x'), origin: { kind: 'plugin' } })
+  assert.match(out.text, /^TODO_ADDED: x$/)
+})
+
+test('a subagent turn.complete passes through and keeps the count for the main turn', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'turn.start', turn)
+  await fire($, 'command.run', typed('one'))
+  assert.equal((await fire($, 'turn.complete', { ...done, agentId: 'a1' })).passed, true)
+  assert.equal((await fire($, 'turn.complete', { ...done, answer: 'A' })).out.text, 'Todo: +1 this turn · 1 open')
+})
+
+test('the turn line calls next and keeps a line another hook set', async () => {
+  resetCapture()
+  const dir = await repo(); const { $, fire, on } = session(dir)
+  await fire($, 'turn.start', turn)
+  await fire($, 'command.run', typed('one'))
+  const out = (await fire($, 'turn.complete', { ...done, answer: 'A' }, { text: 'Other: line' })).out
+  assert.equal(out.text, 'Other: line\nTodo: +1 this turn · 1 open')
 })

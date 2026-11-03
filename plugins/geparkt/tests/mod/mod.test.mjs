@@ -15,8 +15,8 @@ async function repo() {
 function session(dir, options = {}) {
   const $ = fakeDollar({ cwd: dir, ...options }); const { on, fire } = recorder(); register(on); return { $, fire }
 }
-const skill = (args) => ({ tool: 'Skill', skill: 'geparkt:geparkt', args })
-const command = (args = '') => ({ command: 'geparkt:geparkt', args, origin: { kind: 'composer' } })
+const skill = (args) => ({ tool: 'Skill', skill: 'geparkt:track', args })
+const command = (args = '') => ({ command: 'geparkt:track', args, origin: { kind: 'composer' } })
 const band = { component: 'AbovePrompt', surface: 'terminal', props: {} }
 const paneSite = { component: 'Pane', surface: 'terminal', requestId: 'geparkt-review', props: { isFocused: true } }
 const press = (tree, key) => find(tree, (n) => n.type === 'Button' && n.key === key).onPress({ surface: 'terminal' })
@@ -126,7 +126,7 @@ test('pane: resolve, note, back and close', async () => {
 })
 
 test('pane: defer asks once, then hands the thread to todo', async () => {
-  const dir = await repo(); const { $, fire } = session(dir, { commands: ['todo:todo'] })
+  const dir = await repo(); const { $, fire } = session(dir, { commands: ['todo', 'todo:capture'], todoReply: 'TODO_ADDED: A?' })
   await fire($, 'tool.call', skill('+q A?'))
   await fire($, 'command.run', command())
   let tree = (await fire($, 'ui.render', paneSite)).out
@@ -135,7 +135,7 @@ test('pane: defer asks once, then hands the thread to todo', async () => {
   tree = (await fire($, 'ui.render', paneSite)).out
   assert.ok(find(tree, (n) => n.type === 'Button' && n.label === 'defer: press f again'))
   await press(tree, 'defer')
-  assert.deepEqual($.log.commands[0], { command: 'todo:todo', args: 'A? #question' })
+  assert.deepEqual($.log.commands[0], { command: 'todo', args: 'A? #question' })
   assert.equal((await fileOf(dir)).threads[0].status, 'deferred')
 })
 
@@ -270,4 +270,104 @@ test('git is asked for the root once per working directory', async () => {
   await fire($, 'tool.call', skill('+q A?'))
   await fire($, 'tool.call', skill('r1'))
   assert.equal(calls, 1)
+})
+
+test('session.start registers /geparkt as immediate', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  assert.equal((await fire($, 'session.start', {})).passed, true)
+  assert.equal($.log.registered.length, 1)
+  assert.deepEqual({ ...$.log.registered[0], description: 'x' }, { name: 'geparkt', description: 'x', argumentHint: '[list]', immediate: true })
+})
+
+test('a refused /geparkt registration toasts once and session.start still passes on', async () => {
+  const dir = await repo(); const { $, fire } = session(dir, { registerThrows: true })
+  assert.equal((await fire($, 'session.start', {})).passed, true)
+  assert.equal((await fire($, 'session.start', {})).passed, true)
+  assert.equal($.log.toasts.filter((t) => /use \/geparkt:track/.test(t)).length, 1)
+})
+
+test('typed /geparkt and /geparkt:track both answer', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  for (const name of ['geparkt', 'geparkt:track']) {
+    const { passed, out } = await fire($, 'command.run', { command: name, args: 'list', origin: { kind: 'composer' } })
+    assert.equal(passed, false, name)
+    assert.equal(out.text, 'No open threads.')
+  }
+})
+
+import { deferOutcome } from '../../hooks/mod.js'
+
+test('deferOutcome reads todo\'s marker', () => {
+  assert.equal(deferOutcome('TODO_ADDED: q #question'), 'ok')
+  assert.equal(deferOutcome('TODO_DUPLICATE: q'), 'ok')
+  assert.deepEqual(deferOutcome('TODO_FAILED: the reason'), { failed: 'the reason' })
+  assert.deepEqual(deferOutcome('Added to todo list: q'), { failed: 'no answer from the todo plugin' })
+  assert.deepEqual(deferOutcome(''), { failed: 'no answer from the todo plugin' })
+})
+
+async function deferTwice(options) {
+  const dir = await repo(); const { $, fire } = session(dir, options)
+  await fire($, 'tool.call', skill('+q A?'))
+  await fire($, 'command.run', command())
+  await press((await fire($, 'ui.render', paneSite)).out, 'defer')
+  await press((await fire($, 'ui.render', paneSite)).out, 'defer')
+  return { $, dir }
+}
+
+test('pane: defer uses /todo:capture when /todo is not registered', async () => {
+  const { $, dir } = await deferTwice({ commands: ['todo:capture'], todoReply: 'TODO_DUPLICATE: A?' })
+  assert.equal($.log.commands[0].command, 'todo:capture')
+  assert.equal((await fileOf(dir)).threads[0].status, 'deferred')
+})
+
+test('pane: an English reply instead of the marker leaves the thread open', async () => {
+  const { $, dir } = await deferTwice({ commands: ['todo'], todoReply: 'Added to todo list: A?' })
+  assert.equal((await fileOf(dir)).threads[0].status, 'open')
+  assert.ok($.log.toasts.some((t) => /no answer from the todo plugin/.test(t)))
+})
+
+test('pane: a todo failure is named in a toast and leaves the thread open', async () => {
+  const { $, dir } = await deferTwice({ commands: ['todo'], todoReply: 'TODO_FAILED: x is a symlink' })
+  assert.equal((await fileOf(dir)).threads[0].status, 'open')
+  assert.ok($.log.toasts.some((t) => /x is a symlink/.test(t)))
+})
+
+const turn = { text: 'go', turnId: 't1' }
+const done = { reason: 'answer', turnId: 't1' }
+
+test('turn.complete shows the open count when the turn added a thread', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'turn.start', turn)
+  await fire($, 'tool.call', skill('+q A?'))
+  assert.equal((await fire($, 'turn.complete', done)).out.text, 'Geparkt: 1 open (+1)')
+})
+
+test('turn.complete shows a negative change when a thread was resolved', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'tool.call', skill('+q A? | +q B?'))
+  await fire($, 'turn.start', turn)
+  await fire($, 'tool.call', skill('r1 yes'))
+  assert.equal((await fire($, 'turn.complete', done)).out.text, 'Geparkt: 1 open (-1)')
+})
+
+test('turn.complete passes through when the open count did not change', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'tool.call', skill('+q A?'))
+  await fire($, 'turn.start', turn)
+  assert.equal((await fire($, 'turn.complete', done)).passed, true)
+})
+
+test('a subagent turn.complete passes through for geparkt', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'turn.start', turn)
+  await fire($, 'tool.call', skill('+q A?'))
+  assert.equal((await fire($, 'turn.complete', { ...done, agentId: 'a1' })).passed, true)
+  assert.equal((await fire($, 'turn.complete', { ...done, answer: 'A' })).out.text, 'Geparkt: 1 open (+1)')
+})
+
+test('the geparkt turn line keeps a line another hook set', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'turn.start', turn)
+  await fire($, 'tool.call', skill('+q A?'))
+  assert.equal((await fire($, 'turn.complete', { ...done, answer: 'A' }, { text: 'Todo: +1 this turn' })).out.text, 'Todo: +1 this turn\nGeparkt: 1 open (+1)')
 })

@@ -16,6 +16,11 @@ export type ReviewPane = {
   retagged: number
 }
 
+export type Capture = {
+  cwd: string
+  draft: string
+}
+
 export type View = {
   root: string | null
   items: string[]
@@ -23,6 +28,7 @@ export type View = {
   notes: Record<string, Note[]>
   bandUntil: number
   pane: ReviewPane | null
+  capture: Capture | null
 }
 
 declare module 'claude-code' {

@@ -9,13 +9,14 @@ export function recorder() {
     hooks.push({ event, matcher, handler })
     return { catch() {} }
   }
-  // Runs the registered hooks for event in order; next() past the last one stands for core.
-  async function fire($, event, e) {
+  // Runs the registered hooks for event in order; next() past the last one stands for core, whose
+  // result fields can be given as core.
+  async function fire($, event, e, core = {}) {
     const chain = hooks.filter((h) => h.event === event && Object.entries(h.matcher).every(([k, v]) => e[k] === v))
     let index = 0
     const next = async (input) => {
       const hook = chain[index++]
-      if (!hook) return { [PASSED]: true, ...input }
+      if (!hook) return { [PASSED]: true, ...input, ...core }
       return hook.handler($, input, next)
     }
     const out = await next(e)
@@ -24,14 +25,21 @@ export function recorder() {
   return { on, fire }
 }
 
-export function fakeDollar({ cwd, surfaces = ['terminal'], today, toolCheck = { decision: 'allow' } } = {}) {
+export function fakeDollar({ cwd, surfaces = ['terminal'], today, toolCheck = { decision: 'allow' }, registerThrows = false } = {}) {
   const base = nodeIo({ today })
   const state = new Map()
-  const log = { toasts: [], opened: [], closed: [], invalidations: 0, timers: [] }
+  const log = { toasts: [], opened: [], closed: [], invalidations: 0, timers: [], registered: [] }
   const element = (type) => (props) => ({ type, ...props })
   return {
     log,
     plugin: { name: 'todo', root: '/plugin' },
+    command: {
+      register: async (spec) => {
+        if (registerThrows) throw new Error(`"/${spec.name}" refused: it is the plugin's /todo:capture`)
+        log.registered.push(spec)
+        return { command: spec.name }
+      },
+    },
     session: { cwd: async () => cwd, surfaces: async () => surfaces },
     fs: {
       read: async (path) => { const text = await base.read(path); if (text === null) throw new Error('ENOENT'); return text },

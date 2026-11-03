@@ -3,7 +3,7 @@
 // Thread text never reaches a shell: subprocesses take argument vectors and the text is never one.
 import * as store from './store.js'
 
-const SKILL = 'geparkt:geparkt'
+const SKILL = 'geparkt:track'
 const PANE = 'geparkt-review'
 const INSIDE = 'the session directory is inside .git or .claude'
 
@@ -66,13 +66,27 @@ function refresh($, io, root, sessionId) {
   })
 }
 
-// Loads this session's threads, so the band is right after a resume or a reload.
+// The mod's own /geparkt, registered as immediate so the review opens while Claude is mid-turn.
+// A skill may not share a registered command's name, which is why the skill is named track.
+const COMMAND = 'geparkt'
+// The fallback toast for a refused registration is shown once per mod load.
+let warned = false
+
+// Loads this session's threads, so the band is right after a resume or a reload, then registers
+// /geparkt last: a refusal (an older engine, or a name taken by another plugin) leaves
+// /geparkt:track, which waits for the turn to end, and one toast says so.
 async function startSession($, e, next) {
   const result = await next(e)
   try {
     const { io, root, sessionId } = await where($)
     if (!store.rootRefused(root)) await refresh($, io, root, sessionId)
   } catch { /* the band stays empty */ }
+  try {
+    await $.command.register({ name: COMMAND, description: 'Review the open questions and parked topics, also while Claude is working', argumentHint: '[list]', immediate: true })
+  } catch {
+    if (!warned) $.ui.toast('Mid-turn /geparkt is unavailable here; use /geparkt:track')
+    warned = true
+  }
   return result
 }
 
@@ -108,6 +122,29 @@ async function callSkill($, e, next) {
     marker = `GEPARKT_FAILED: ${error.message}`
   }
   return { result: { success: true, commandName: SKILL, status: 'inline' }, context: [store.contextFor(marker)] }
+}
+
+// The open count when the current turn started, for the line under its answer.
+let openAtStart = 0
+
+async function turnStart($, e, next) {
+  openAtStart = (await getView($)).threads.length
+  return next(e)
+}
+
+// One line under an answer, only when the turn changed the number of open threads. A subagent's
+// turn ends without a turn.start of its own and leaves the count to the main turn. next(e)
+// resolves to the answer, or to a line another mod set, which is kept above this one.
+async function turnComplete($, e, next) {
+  if (e.agentId !== undefined) return next(e)
+  const open = (await getView($)).threads.length
+  const delta = open - openAtStart
+  openAtStart = open
+  if (delta === 0) return next(e)
+  const result = await next(e)
+  const line = `Geparkt: ${open} open (${delta > 0 ? '+' : ''}${delta})`
+  const set = result.text !== undefined && result.text !== e.answer ? result.text : null
+  return { ...result, text: set === null ? line : `${set}\n${line}` }
 }
 
 export function listText(threads, now) {
@@ -216,21 +253,36 @@ async function backAction($) {
   await $.ui.close({ id: PANE })
 }
 
+// What todo's answer to another plugin's /todo means: todo returns its marker line to plugin
+// callers, so the check does not depend on the wording of its replies. Exported for tests.
+export function deferOutcome(text) {
+  if (text.startsWith('TODO_ADDED: ') || text.startsWith('TODO_DUPLICATE: ')) return 'ok'
+  if (text.startsWith('TODO_FAILED: ')) return { failed: text.slice('TODO_FAILED: '.length) }
+  return { failed: 'no answer from the todo plugin' }
+}
+
+// todo's immediate /todo where registered, else its skill command.
+async function todoCommand($) {
+  const commands = (await $.command.list()).map((c) => c.name)
+  return ['todo', 'todo:capture'].find((name) => commands.includes(name)) ?? null
+}
+
 // The first f asks, the second hands the thread to the todo plugin and marks it deferred.
 async function deferAction($) {
   const view = await getView($)
   if (view.pane === null) return
   const thread = view.threads[view.pane.index]
   if (!thread) return
+  const command = await todoCommand($)
+  if (command === null) { $.ui.toast('Defer needs the todo plugin'); return }
   if (view.pane.deferFor !== thread.id) {
-    const commands = (await $.command.list()).map((c) => c.name)
-    if (!commands.includes('todo:todo')) { $.ui.toast('Defer needs the todo plugin'); return }
     await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, deferFor: thread.id } }))
     return
   }
-  const { text = '' } = await $.command.run({ command: 'todo:todo', args: `${thread.text} #question` })
-  if (!/^(Added to|Already on) todo list/.test(text)) {
-    $.ui.toast(text === '' ? 'Todo did not confirm the item' : text)
+  const { text = '' } = await $.command.run({ command, args: `${thread.text} #question` })
+  const outcome = deferOutcome(text)
+  if (outcome !== 'ok') {
+    $.ui.toast(`Defer failed: ${outcome.failed}`)
     await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, deferFor: null } }))
     return
   }
@@ -321,7 +373,10 @@ function modsIo($) {
 export const register = (on) => {
   on('session.start', startSession)
   on('tool.call', { tool: 'Skill' }, callSkill)
-  on('command.run', { command: 'geparkt:geparkt' }, runCommand)
+  on('command.run', { command: SKILL }, runCommand)
+  on('command.run', { command: COMMAND }, runCommand)
+  on('turn.start', turnStart)
+  on('turn.complete', turnComplete)
   on('ui.render', { component: 'AbovePrompt' }, renderBand)
   on('ui.render', { component: 'Pane', requestId: 'geparkt-review' }, renderPane)
   on('ui.close', { id: 'geparkt-review' }, closePane)

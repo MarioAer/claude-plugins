@@ -11,13 +11,14 @@ export function recorder() {
     hooks.push({ event, matcher, handler })
     return { catch() {} }
   }
-  // Runs the registered hooks for event in order; next() past the last one stands for core.
-  async function fire($, event, e) {
+  // Runs the registered hooks for event in order; next() past the last one stands for core, whose
+  // result fields can be given as core.
+  async function fire($, event, e, core = {}) {
     const chain = hooks.filter((h) => h.event === event && Object.entries(h.matcher).every(([k, v]) => e[k] === v))
     let index = 0
     const next = async (input) => {
       const hook = chain[index++]
-      if (!hook) return { [PASSED]: true, ...input }
+      if (!hook) return { [PASSED]: true, ...input, ...core }
       return hook.handler($, input, next)
     }
     const out = await next(e)
@@ -26,9 +27,9 @@ export function recorder() {
   return { on, fire }
 }
 
-export function fakeDollar({ cwd, sessionId = 's1', surfaces = ['terminal'], toolCheck = { decision: 'allow' }, commands = [], todoReply = 'Added to todo list: x' } = {}) {
+export function fakeDollar({ cwd, sessionId = 's1', surfaces = ['terminal'], toolCheck = { decision: 'allow' }, commands = [], todoReply = 'Added to todo list: x', registerThrows = false } = {}) {
   const state = new Map()
-  const log = { toasts: [], opened: [], closed: [], fills: [], commands: [] }
+  const log = { toasts: [], opened: [], closed: [], fills: [], commands: [], registered: [] }
   const element = (type) => (props) => ({ type, ...props })
   return {
     log,
@@ -46,6 +47,11 @@ export function fakeDollar({ cwd, sessionId = 's1', surfaces = ['terminal'], too
     tool: { check: async () => toolCheck },
     prompt: { fill: async (input) => { log.fills.push(input); return { isFilled: true } } },
     command: {
+      register: async (spec) => {
+        if (registerThrows) throw new Error(`"/${spec.name}" refused: it is the plugin's /geparkt:track`)
+        log.registered.push(spec)
+        return { command: spec.name }
+      },
       list: async () => commands.map((name) => ({ name })),
       run: async (input) => { log.commands.push(input); return { text: todoReply } },
     },

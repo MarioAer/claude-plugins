@@ -1,23 +1,32 @@
 // Todo mod: answers typed /todo commands and Claude's own Skill call inside Claude Code, and
-// draws a toast, a transient band and a review pane. Loads on Claude Code 2.1.287 or later; where it
+// draws a toast, a transient band and a review pane. Loads on Claude Code 2.1.292 or later; where it
 // does not load, hooks/todo_hook.py and the skill behave as in 0.2.1. Item text never reaches a
 // shell: subprocesses take argument vectors and the text is never one of them.
 import * as store from './store.js'
 import { localDate } from './io.js'
 
-const SKILL = 'todo:todo'
+const SKILL = 'todo:capture'
 const INSIDE = 'TODO_FAILED: the session directory is inside .git or .claude'
+
+// The mod's own /todo, registered as immediate so it runs while Claude is mid-turn. A skill may
+// not share a registered command's name, which is why the skill is named capture.
+const COMMAND = 'todo'
+const ARGUMENT_HINT = '[<task text> | list | review]'
 
 // A bare /todo remembers the session's cwd; the next prompt typed by the person is the item.
 const CAPTURE_MS = 10 * 60 * 1000
 const CAPTURE_ORIGINS = new Set(['composer', 'sdk', 'bridge'])
 let capture = null
+// The fallback toast for a refused registration is shown once per mod load.
+let warned = false
+// Items added since the current turn started, for the line under its answer.
+let turnAdds = 0
 
-export function resetCapture() { capture = null }
+export function resetCapture() { capture = null; warned = false; turnAdds = 0 }
 
 // What the band and the pane draw from. Written only from events, never while drawing.
 const BAND_MS = 10000
-const EMPTY_VIEW = { root: null, items: [], order: [], notes: {}, bandUntil: 0, pane: null }
+const EMPTY_VIEW = { root: null, items: [], order: [], notes: {}, bandUntil: 0, pane: null, capture: null }
 
 async function getView($) {
   const { value } = await $.state.get({ plugin: 'todo', key: 'view' })
@@ -338,6 +347,41 @@ async function closePane($, e, next) {
   return next(e)
 }
 
+// A bare /todo opens a one-line input instead of taking the next prompt, which mid-turn would be
+// the person's steering message to Claude. Headless runs keep the next-prompt capture.
+const CAPTURE_PANE = 'todo-capture'
+
+async function openCapture($, cwd) {
+  await setView($, (v) => ({ ...v, capture: { cwd, draft: '' } }))
+  await $.ui.open({ id: CAPTURE_PANE, title: 'Add to todo', focus: true, closeOnEscape: true })
+}
+
+async function captureSubmit($, value) {
+  const view = await getView($)
+  if (view.capture === null) return
+  const text = store.normalize(value)
+  await $.ui.close({ id: CAPTURE_PANE })
+  if (text === '') return
+  const { root, marker } = await performAdd($, view.capture.cwd, text, false)
+  $.ui.toast(replyFor(marker))
+  await showBand($, root)
+}
+
+// The input is drawn from the draft, so a redraw (the band timer) keeps what was typed.
+async function renderCapture($, e, next) {
+  const view = await getView($)
+  if (view.capture === null) return next(e)
+  const { Input } = $.ui.resolve(e)
+  return Input({ key: 'capture', label: 'Todo', placeholder: 'empty cancels', value: view.capture.draft, submitLabel: 'add', autoFocus: true,
+    onInput: (value) => setView($, (v) => ({ ...v, capture: v.capture && { ...v.capture, draft: value } })),
+    onSubmit: (value) => captureSubmit($, value) })
+}
+
+async function closeCapture($, e, next) {
+  await setView($, (v) => ({ ...v, capture: null }))
+  return next(e)
+}
+
 // The store's io interface over the mods API, declared here because the validator follows $ only
 // into functions of this file. fs.read and fs.stat reject when the path is missing; the store wants
 // null there. fs.write creates parent directories, as the store relies on.
@@ -364,6 +408,15 @@ export function replyFor(marker) {
   return `Todo failed: ${first.replace(/^TODO_FAILED: /, '')}`
 }
 
+// The answer to a typed /todo add. Another plugin's $.command.run reads the marker; headless runs
+// draw no toast, so they get the reply line; otherwise the toast is the only output, so a mid-turn
+// add puts nothing into the transcript.
+export function answerAdd(marker, originKind, hasSurface) {
+  if (originKind === 'plugin') return { text: marker.split('\n')[0] }
+  if (!hasSurface) return { text: replyFor(marker) }
+  return {}
+}
+
 // What Claude reads after its own Skill call instead of the skill body: the marker SKILL.md
 // section 0 documents, the one-line reply to give, and the data note.
 export function contextFor(marker) {
@@ -378,7 +431,9 @@ async function performAdd($, cwd, text, byClaude) {
   const { root, branch } = located
   if (store.rootRefused(located)) return { root, marker: INSIDE }
   try {
-    return { root, marker: await store.add(io, { root, branch, text, byClaude }) }
+    const marker = await store.add(io, { root, branch, text, byClaude })
+    if (marker.startsWith('TODO_ADDED: ')) turnAdds++
+    return { root, marker }
   } catch (error) {
     if (error instanceof store.Refused) return { root, marker: `TODO_FAILED: ${error.message}` }
     throw error
@@ -404,6 +459,10 @@ async function runCommand($, e, next) {
   const mode = store.modeOf(text)
   const cwd = await $.session.cwd()
   if (mode === 'empty') {
+    if ((await $.session.surfaces()).length > 0) {
+      await openCapture($, cwd)
+      return {}
+    }
     capture = { cwd, until: Date.now() + CAPTURE_MS }
     return { text: 'What should go on the todo list?' }
   }
@@ -422,9 +481,75 @@ async function runCommand($, e, next) {
   }
   const { root, marker } = await performAdd($, cwd, text, false)
   const line = replyFor(marker)
-  $.ui.toast(line)
+  const kind = e.origin?.kind
+  if (kind !== 'plugin') $.ui.toast(line)
   await showBand($, root)
-  return { text: line }
+  if (e.command !== COMMAND && kind !== 'plugin') return { text: line }
+  return answerAdd(marker, kind, (await $.session.surfaces()).length > 0)
+}
+
+// Known tags completing a #prefix typed after /todo or /todo:capture, at most MAX_TAGS, in the
+// file's tag order. Any other prompt gets none. Exported for tests.
+const TAG_TOKEN = /^#[a-z0-9_-]*$/
+export function tagSuggestions(text, token, order) {
+  if (!/^\/todo(:capture)? /.test(text) || !TAG_TOKEN.test(token)) return []
+  const prefix = token.slice(1)
+  return order.filter((tag) => tag.startsWith(prefix)).slice(0, store.MAX_TAGS).map((tag) => ({ text: `#${tag}`, label: `#${tag}` }))
+}
+
+async function autocomplete($, e, next) {
+  if (!/^\/todo(:capture)? /.test(e.text) || !TAG_TOKEN.test(e.token)) return next(e)
+  const io = modsIo($)
+  const located = await store.locate(io, await $.session.cwd())
+  if (store.rootRefused(located)) return next(e)
+  try {
+    const { order } = await store.listWithOrder(io, located.root)
+    const suggestions = tagSuggestions(e.text, e.token, order)
+    return suggestions.length > 0 ? { suggestions } : next(e)
+  } catch (error) {
+    if (error instanceof store.Refused) return next(e)
+    throw error
+  }
+}
+
+async function turnStart($, e, next) {
+  turnAdds = 0
+  return next(e)
+}
+
+// The line beneath an answer, after the hooks behind this one: next(e) resolves to the answer, or
+// to a line another mod set, which is kept above this one.
+export function withLine(result, answer, line) {
+  const set = result.text !== undefined && result.text !== answer ? result.text : null
+  return { ...result, text: set === null ? line : `${set}\n${line}` }
+}
+
+// One line under an answer, only when the turn added items, so unchanged turns stay quiet. A
+// subagent's turn ends without a turn.start of its own and leaves the count to the main turn.
+async function turnComplete($, e, next) {
+  if (e.agentId !== undefined || turnAdds === 0) return next(e)
+  const result = await next(e)
+  const added = turnAdds
+  turnAdds = 0
+  let open = ''
+  const io = modsIo($)
+  const located = await store.locate(io, await $.session.cwd())
+  if (!store.rootRefused(located)) {
+    try { open = ` · ${(await store.list(io, located.root)).length} open` } catch (error) { if (!(error instanceof store.Refused)) throw error }
+  }
+  return withLine(result, e.answer, `Todo: +${added} this turn${open}`)
+}
+
+// Registers the immediate /todo. A refusal (an older engine, or a name taken by another plugin)
+// leaves /todo:capture, which waits for the turn to end; one toast says so.
+async function startSession($, e, next) {
+  try {
+    await $.command.register({ name: COMMAND, description: 'Add to the todo list, also while Claude is working', argumentHint: ARGUMENT_HINT, immediate: true })
+  } catch {
+    if (!warned) $.ui.toast('Mid-turn /todo is unavailable here; use /todo:capture')
+    warned = true
+  }
+  return next(e)
 }
 
 async function callSkill($, e, next) {
@@ -457,10 +582,17 @@ async function submitPrompt($, e, next) {
 }
 
 export const register = (on) => {
-  on('command.run', { command: 'todo:todo' }, runCommand)
+  on('session.start', startSession)
+  on('command.run', { command: SKILL }, runCommand)
+  on('command.run', { command: COMMAND }, runCommand)
   on('tool.call', { tool: 'Skill' }, callSkill)
   on('prompt.submit', submitPrompt)
+  on('prompt.autocomplete', autocomplete)
+  on('turn.start', turnStart)
+  on('turn.complete', turnComplete)
   on('ui.render', { component: 'AbovePrompt' }, renderBand)
   on('ui.render', { component: 'Pane', requestId: 'todo-review' }, renderPane)
   on('ui.close', { id: 'todo-review' }, closePane)
+  on('ui.render', { component: 'Pane', requestId: 'todo-capture' }, renderCapture)
+  on('ui.close', { id: 'todo-capture' }, closeCapture)
 }

@@ -23,12 +23,17 @@ Keeps track of the questions Claude asks and the topics it parks. Claude asks th
 | | |
 |---|---|
 | Band | `Geparkt: 3 open · 2 questions · 1 stale` above the prompt while any thread is open; `p` opens the review. A thread untouched for an hour is stale. |
+| Turn line | `Geparkt: 3 open (+1)` under an answer, only when that turn changed the number of open threads. |
 | `/geparkt` | Opens the review pane; without a pane surface (headless, SDK) it prints the open threads. |
 | `/geparkt list` | Prints the open threads. |
 
 In the pane: `j`/`k` move, `b` puts the thread back in the prompt box as a draft (`Back to #3: …`) and closes the pane, `d` resolves, `x` drops, `n` adds a note, `f` twice defers the thread to the [todo](../todo) plugin as `<text> #question`, `q` closes.
 
-If another skill or command already uses the name `geparkt`, use `/geparkt:geparkt`.
+If another skill or command already uses the name `geparkt`, use `/geparkt:track`.
+
+With the mod loaded, `/geparkt` is an immediate command: it opens the review or prints the list while Claude is working, instead of waiting for the turn to end. Where the engine refuses the registration, one toast says so and `/geparkt:track` works as before.
+
+Upgrading from 0.1: the skill is now `track`, so the namespaced command is `/geparkt:track` (formerly `/geparkt:geparkt`), and a `Skill(geparkt:geparkt)` permission rule must be renamed to `Skill(geparkt:track)`.
 
 ## Storage
 
@@ -46,8 +51,8 @@ On Claude Code before 2.1.287, with `--safe-mode`, `disableAllHooks` or wherever
 ## Permissions
 
 - The mod and the hook write only `<root>/.geparkt/` (the session's file and `.gitignore`), refuse symlinks there and session ids that are not plain names, and run only `git rev-parse` with fixed arguments. Thread text is never a subprocess argument.
-- The mod answers Claude's own `Skill(geparkt:geparkt)` call itself, only when the engine's permission decision is allow: an `ask` or `deny` rule on `Skill(geparkt:geparkt)` goes to the engine, which prompts or refuses (the fallback hook then records an allowed call, and the band is redrawn from the file after it). No other tool call is answered or approved.
-- Deferring to todo runs `/todo` through Claude Code's command API, only after the second `f`, and only when a `todo:todo` command exists.
+- The mod answers Claude's own `Skill(geparkt:track)` call itself, only when the engine's permission decision is allow: an `ask` or `deny` rule on `Skill(geparkt:track)` goes to the engine, which prompts or refuses (the fallback hook then records an allowed call, and the band is redrawn from the file after it). No other tool call is answered or approved.
+- Deferring to todo runs `/todo` (or `/todo:capture` where `/todo` is not registered) through Claude Code's command API, only after the second `f`, and only when one of them exists. The thread is marked deferred only when todo answers with its `TODO_ADDED` or `TODO_DUPLICATE` marker (todo 0.7 or later); anything else leaves it open and names the failure in a toast. Claude Code runs a command started through this API once the session is idle, so a second `f` pressed mid-turn takes effect when the turn ends, and todo's marker line (`TODO_ADDED: …`) then shows in the transcript.
 
 ## License
 

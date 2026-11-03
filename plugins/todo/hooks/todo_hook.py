@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-SKILL = "todo:todo"
+SKILL = "todo:capture"
 HEADER = (
     "# Todo\n\n"
     "Deferred tasks captured with /todo. This folder is ignored by git; do not commit it.\n\n"

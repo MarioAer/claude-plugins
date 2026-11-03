@@ -1,11 +1,11 @@
 # Todo skill: behavioral scenarios
 
-Scenarios for `plugins/todo/skills/todo/SKILL.md`. Rows marked `e2e` run headless in `plugins/todo/tests/e2e.sh`; rows marked `manual` need an interactive session.
+Scenarios for `plugins/todo/skills/capture/SKILL.md`. Rows marked `e2e` run headless in `plugins/todo/tests/e2e.sh`; rows marked `manual` need an interactive session.
 
 ## Running
 
 - Automated: `plugins/todo/tests/e2e.sh` (all) or `plugins/todo/tests/e2e.sh S1 S16` (selected). Set `MODEL` to override the default `sonnet`. The script calls the Claude API.
-- Manual: in a scratch repository (`cd "$(mktemp -d)" && git init -q -b main && git commit -q --allow-empty -m init`), start `claude --plugin-dir <path-to-repo>/plugins/todo`. If bare `/todo` is shadowed, use `/todo:todo`.
+- Manual: in a scratch repository (`cd "$(mktemp -d)" && git init -q -b main && git commit -q --allow-empty -m init`), start `claude --plugin-dir <path-to-repo>/plugins/todo`. If bare `/todo` is shadowed, use `/todo:capture`.
 
 `<today>` means the output of `date +%F`. `<branch>` means the output of `git branch --show-current`.
 
@@ -36,7 +36,7 @@ Scenarios for `plugins/todo/skills/todo/SKILL.md`. Rows marked `e2e` run headles
 | S21 | e2e | Headless session, 2 open items | `/todo review` | Prints the numbered list; file unchanged |
 | S22 | e2e | File with an open item | `/todo LIST` | List mode; no item `LIST` added |
 | S23 | e2e | Any | `/todo` with text spanning two lines | Stored as one line, line break replaced by a space |
-| S24 | e2e | `Skill(todo:todo)` approved | Prompt asks Claude to record an item with the skill, then create `notes.txt` | Item recorded; the `Skill` grant does not cover writing `notes.txt` (denied headless) |
+| S24 | e2e | `Skill(todo:capture)` approved | Prompt asks Claude to record an item with the skill, then create `notes.txt` | Item recorded; the `Skill` grant does not cover writing `notes.txt` (denied headless) |
 | S25 | manual | 3 open items | `/todo review`; answers: done, quit | Only item 1 marked done; items 2 and 3 unchanged |
 | S26 | e2e | Git repo, hooks enabled | `/todo hook path item` | No tool call in the transcript; item written once |
 | S27 | e2e | Hooks disabled (`disableAllHooks`); fallback tools approved | `/todo fallback item` | The skill's fallback adds the item |
@@ -50,3 +50,4 @@ Scenarios for `plugins/todo/skills/todo/SKILL.md`. Rows marked `e2e` run headles
 | S35 | e2e | Mod loaded, one tagged and one untagged item | `/todo list #auth` | No model turn; only the tagged item is listed |
 | S36 | e2e | Hooks disabled, fallback tools approved | `/todo fallback tagged #ops` | The skill's fallback stores `, tags: ops` |
 | S37 | manual | Interactive terminal, items with two tags and one without | `/todo review`; `t`, type `docs`, Enter | Pane shows one heading per tag in its own colour, untagged last; the item moves under `#docs` with the cursor on it; `list #docs` then shows it |
+| S38 | manual | Interactive terminal, mod loaded | Ask Claude for a slow task (`sleep 30` through Bash); while it runs, type `/todo mid-turn check` | Toast `Added to todo list: mid-turn check` before the turn ends; the item is in `.todo/todo.md`; Claude's turn continues and its transcript shows no todo output |
