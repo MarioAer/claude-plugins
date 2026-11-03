@@ -54,7 +54,7 @@ def git(args, cwd):
 
 
 def locate(cwd):
-    """Return (root, branch) from one git call; outside a repository, (cwd, None).
+    """Return (root, branch, in_repo) from one git call; outside a work tree, (cwd, None, False).
 
     The branch is read from the HEAD file rather than resolved by git, so an unborn branch
     (git init without a commit) still has a name, as with `git branch --show-current`.
@@ -62,8 +62,8 @@ def locate(cwd):
     out = git(["rev-parse", "--show-toplevel", "--git-path", "HEAD"], cwd)
     lines = out.splitlines() if out else []
     if len(lines) < 2:
-        return os.path.realpath(cwd), None
-    return os.path.realpath(lines[0]), head_branch(os.path.join(cwd, lines[1]))
+        return os.path.realpath(cwd), None, False
+    return os.path.realpath(lines[0]), head_branch(os.path.join(cwd, lines[1])), True
 
 
 def head_branch(head_file):
@@ -244,8 +244,9 @@ def handle(event):
     cwd = event.get("cwd")
     if not text or not isinstance(cwd, str) or not os.path.isdir(cwd):
         return None
-    root, branch = locate(cwd)
-    if {".git", ".claude"} & set(root.split(os.sep)):
+    root, branch, in_repo = locate(cwd)
+    # A work tree root is never inside .git; a worktree may sit under .claude/worktrees.
+    if not in_repo and {".git", ".claude"} & set(root.split(os.sep)):
         return "TODO_FAILED: the session directory is inside .git or .claude"
     mode = text.casefold()
     try:

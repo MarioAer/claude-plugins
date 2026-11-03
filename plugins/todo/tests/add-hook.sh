@@ -250,6 +250,17 @@ check "list inside .git is refused" equals "${out%%:*}" "TODO_FAILED"
 new_repo "$WORK/my.claude.repo"
 out=$(typed "$WORK/my.claude.repo" "x" | ctx)
 check "repository named my.claude.repo still adds" equals "${out%%:*}" "TODO_ADDED"
+new_repo "$WORK/wtbase"
+"${G[@]}" -C "$WORK/wtbase" commit -q --allow-empty -m init
+git -C "$WORK/wtbase" worktree add -q -b wt "$WORK/wtbase/.claude/worktrees/wt"
+out=$(typed "$WORK/wtbase/.claude/worktrees/wt" "x" | ctx)
+check "worktree under .claude adds" equals "${out%%:*}" "TODO_ADDED"
+check "worktree item written in the worktree" has_line "$WORK/wtbase/.claude/worktrees/wt/.todo/todo.md" "- [ ] x ($TODAY, branch: wt)"
+out=$(typed "$WORK/wtbase/.claude/worktrees/wt" "list" | ctx)
+check "list in worktree under .claude" equals "${out%%:*}" "TODO_LIST"
+new_repo "$WORK/par/.claude/repo"
+out=$(typed "$WORK/par/.claude/repo" "x" | ctx)
+check "repository below a .claude parent adds" equals "${out%%:*}" "TODO_ADDED"
 
 # --- no output -----------------------------------------------------------------
 new_repo "$WORK/quiet"
