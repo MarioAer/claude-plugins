@@ -61,6 +61,15 @@ test('a session directory inside .git is refused in every mode', async () => {
   assert.equal((await fire($, 'command.run', command('list'))).out.text, 'Todo failed: the session directory is inside .git or .claude')
 })
 
+test('a worktree under .claude adds and lists', async () => {
+  const dir = await repo(); const wt = join(dir, '.claude/worktrees/wt')
+  execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'init'])
+  execFileSync('git', ['-C', dir, 'worktree', 'add', '-q', '-b', 'wt', wt])
+  const { $, fire } = session(wt)
+  await fire($, 'command.run', command('x'))
+  assert.equal((await fire($, 'command.run', command('list'))).out.text, `1. x (${TODAY}, branch: wt)`)
+})
+
 test('other commands pass through untouched', async () => {
   const dir = await repo(); const { $, fire } = session(dir)
   assert.equal((await fire($, 'command.run', { ...command('x'), command: 'other:cmd' })).passed, true)

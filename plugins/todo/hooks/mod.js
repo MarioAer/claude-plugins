@@ -374,8 +374,9 @@ export function contextFor(marker) {
 // Adds text under the session's root; every refusal becomes a TODO_FAILED marker.
 async function performAdd($, cwd, text, byClaude) {
   const io = modsIo($)
-  const { root, branch } = await store.locate(io, cwd)
-  if (store.rootRefused(root)) return { root, marker: INSIDE }
+  const located = await store.locate(io, cwd)
+  const { root, branch } = located
+  if (store.rootRefused(located)) return { root, marker: INSIDE }
   try {
     return { root, marker: await store.add(io, { root, branch, text, byClaude }) }
   } catch (error) {
@@ -386,8 +387,9 @@ async function performAdd($, cwd, text, byClaude) {
 
 async function listText($, cwd, tag = null) {
   const io = modsIo($)
-  const { root } = await store.locate(io, cwd)
-  if (store.rootRefused(root)) return { root, text: replyFor(INSIDE) }
+  const located = await store.locate(io, cwd)
+  const { root } = located
+  if (store.rootRefused(located)) return { root, text: replyFor(INSIDE) }
   try {
     const items = await store.list(io, root, tag)
     return { root, items, text: items.length ? store.numbered(items) : 'Todo list is empty.' }
