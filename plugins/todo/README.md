@@ -16,7 +16,7 @@ Records tasks you want to defer while Claude Code keeps working on the current t
 | Command | Action |
 |---|---|
 | `/todo <text>` | Add an item, also while Claude is working, and confirm with a toast; Claude's turn continues untouched. Trailing `#tags` (letters, digits, `-`, `_`, up to 8) are stored as tags. |
-| `/todo` | Ask once for the text, then add it. |
+| `/todo` | Open a one-line input for the item (headless: ask once, then take the next prompt). |
 | `/todo list` | Show open items as a numbered list. |
 | `/todo list #<tag>` | Show only the open items carrying that tag. |
 | `/todo review` | For each open item, answer done, skip, update or quit; changes are shown, then written once. |
@@ -44,7 +44,7 @@ Item format:
 On Claude Code 2.1.287 or later the plugin also loads a mod (`hooks/mod.js`, a hooks module that runs inside Claude Code). With it:
 
 - The mod registers `/todo` as an immediate command, so a typed `/todo <text>` is recorded at once, even while Claude is mid-turn; the toast is the only confirmation and nothing enters the transcript. Headless runs, where no toast is drawn, print the reply line instead. Where the engine refuses the registration (older versions, or another plugin owns `/todo`), one toast says so and `/todo:capture` works as before but waits for the turn to end.
-- A typed `/todo <text>`, `/todo list` and `/todo review` are answered by the mod: no model turn starts and no skill text is loaded, so they cost no tokens. A bare `/todo` prints the question and takes your next prompt as the item, also without a turn.
+- A typed `/todo <text>`, `/todo list` and `/todo review` are answered by the mod: no model turn starts and no skill text is loaded, so they cost no tokens. A bare `/todo` opens a one-line `Add to todo` input above the prompt (Enter adds, empty Enter or Esc cancels), so a message you type to Claude is never taken as the item; in headless runs it prints the question and takes your next prompt as the item, also without a turn.
 - Claude's own `Skill(todo:capture)` call is answered by the mod: the item is recorded, Claude reads one context line instead of the skill text, and confirms in one line (about 30 tokens).
 - Every add, duplicate or failure shows a toast. A band above the prompt shows `Todo: N open` for ten seconds after any todo call and while review is open; it is never shown otherwise.
 - `/todo review` opens a pane with the open items grouped by tag and a detail card for the item under the cursor (date, branch, tags and its notes). Keys: `j`/`k` move, `g`/`e` jump to the first/last item, `d` done, `u` undo the last done, `n` note (stays on the item), `t` tags (lists the known tags), `q` close. Each action is written at once. While the pane has the keyboard its border is cyan and the header shows `● keys active`; otherwise it is dimmed and `ctrl+x tab` focuses it. Closing shows a summary toast. In headless runs, the VS Code extension and the SDK, where nothing is drawn, review falls back to the question loop below.

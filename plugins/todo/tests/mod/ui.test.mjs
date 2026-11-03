@@ -378,3 +378,41 @@ test('the tags and note inputs keep what was typed across a redraw', async () =>
   note = find(await pane($, fire), (n) => n.type === 'Input' && n.key === 'note')
   assert.equal(note.value, 'half a', 'the note draft survives a redraw too')
 })
+
+const bare = (cmd = 'todo') => ({ command: cmd, args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+const captureSite = { component: 'Pane', surface: 'terminal', requestId: 'todo-capture', props: { isFocused: true, bodyColumns: 80 } }
+const captureInput = async ($, fire) => find((await fire($, 'ui.render', captureSite)).out, (n) => n.type === 'Input')
+
+test('bare /todo with a surface opens the capture pane', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  const { out } = await fire($, 'command.run', bare())
+  assert.deepEqual(out, {})
+  assert.equal($.log.opened[0].id, 'todo-capture')
+  assert.equal($.log.opened[0].focus, true)
+  const next = await fire($, 'prompt.submit', { text: 'steer Claude', wait: false, origin: { kind: 'composer' } })
+  assert.equal(next.passed, true, 'the next prompt is not taken as the item')
+})
+
+test('submitting the capture input adds the item and closes', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', bare())
+  await (await captureInput($, fire)).onSubmit('later thing')
+  assert.match(await read(dir), /- \[ \] later thing \(/)
+  assert.ok($.log.toasts.includes('Added to todo list: later thing'))
+  assert.ok($.log.closed.includes('todo-capture'))
+})
+
+test('an empty capture submit closes without writing', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', bare('todo:capture'))
+  await (await captureInput($, fire)).onSubmit('   ')
+  assert.ok($.log.closed.includes('todo-capture'))
+  await assert.rejects(read(dir))
+})
+
+test('the capture input keeps its draft across redraws', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', bare())
+  await (await captureInput($, fire)).onInput('half typed')
+  assert.equal((await captureInput($, fire)).value, 'half typed')
+})

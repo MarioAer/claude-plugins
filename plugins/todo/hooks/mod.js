@@ -24,7 +24,7 @@ export function resetCapture() { capture = null; warned = false }
 
 // What the band and the pane draw from. Written only from events, never while drawing.
 const BAND_MS = 10000
-const EMPTY_VIEW = { root: null, items: [], order: [], notes: {}, bandUntil: 0, pane: null }
+const EMPTY_VIEW = { root: null, items: [], order: [], notes: {}, bandUntil: 0, pane: null, capture: null }
 
 async function getView($) {
   const { value } = await $.state.get({ plugin: 'todo', key: 'view' })
@@ -345,6 +345,41 @@ async function closePane($, e, next) {
   return next(e)
 }
 
+// A bare /todo opens a one-line input instead of taking the next prompt, which mid-turn would be
+// the person's steering message to Claude. Headless runs keep the next-prompt capture.
+const CAPTURE_PANE = 'todo-capture'
+
+async function openCapture($, cwd) {
+  await setView($, (v) => ({ ...v, capture: { cwd, draft: '' } }))
+  await $.ui.open({ id: CAPTURE_PANE, title: 'Add to todo', focus: true, closeOnEscape: true })
+}
+
+async function captureSubmit($, value) {
+  const view = await getView($)
+  if (view.capture === null) return
+  const text = store.normalize(value)
+  await $.ui.close({ id: CAPTURE_PANE })
+  if (text === '') return
+  const { root, marker } = await performAdd($, view.capture.cwd, text, false)
+  $.ui.toast(replyFor(marker))
+  await showBand($, root)
+}
+
+// The input is drawn from the draft, so a redraw (the band timer) keeps what was typed.
+async function renderCapture($, e, next) {
+  const view = await getView($)
+  if (view.capture === null) return next(e)
+  const { Input } = $.ui.resolve(e)
+  return Input({ key: 'capture', label: 'Todo', placeholder: 'empty cancels', value: view.capture.draft, submitLabel: 'add', autoFocus: true,
+    onInput: (value) => setView($, (v) => ({ ...v, capture: v.capture && { ...v.capture, draft: value } })),
+    onSubmit: (value) => captureSubmit($, value) })
+}
+
+async function closeCapture($, e, next) {
+  await setView($, (v) => ({ ...v, capture: null }))
+  return next(e)
+}
+
 // The store's io interface over the mods API, declared here because the validator follows $ only
 // into functions of this file. fs.read and fs.stat reject when the path is missing; the store wants
 // null there. fs.write creates parent directories, as the store relies on.
@@ -420,6 +455,10 @@ async function runCommand($, e, next) {
   const mode = store.modeOf(text)
   const cwd = await $.session.cwd()
   if (mode === 'empty') {
+    if ((await $.session.surfaces()).length > 0) {
+      await openCapture($, cwd)
+      return {}
+    }
     capture = { cwd, until: Date.now() + CAPTURE_MS }
     return { text: 'What should go on the todo list?' }
   }
@@ -495,4 +534,6 @@ export const register = (on) => {
   on('ui.render', { component: 'AbovePrompt' }, renderBand)
   on('ui.render', { component: 'Pane', requestId: 'todo-review' }, renderPane)
   on('ui.close', { id: 'todo-review' }, closePane)
+  on('ui.render', { component: 'Pane', requestId: 'todo-capture' }, renderCapture)
+  on('ui.close', { id: 'todo-capture' }, closeCapture)
 }

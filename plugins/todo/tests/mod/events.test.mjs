@@ -121,9 +121,9 @@ import { resetCapture } from '../../hooks/mod.js'
 
 const prompt = (text, kind = 'composer') => ({ text, wait: false, origin: { kind } })
 
-test('bare /todo asks, then the next prompt is captured and dropped', async () => {
+test('headless bare /todo asks, then the next prompt is captured and dropped', async () => {
   resetCapture()
-  const dir = await repo(); const { $, fire } = session(dir)
+  const dir = await repo(); const { $, fire } = session(dir, { surfaces: [] })
   assert.equal((await fire($, 'command.run', command(''))).out.text, 'What should go on the todo list?')
   const { passed, out } = await fire($, 'prompt.submit', prompt('captured item'))
   assert.equal(passed, false)
@@ -135,7 +135,7 @@ test('bare /todo asks, then the next prompt is captured and dropped', async () =
 test('a slash command or a blank prompt from the user cancels the capture', async () => {
   for (const text of ['/help', '   ']) {
     resetCapture()
-    const dir = await repo(); const { $, fire } = session(dir)
+    const dir = await repo(); const { $, fire } = session(dir, { surfaces: [] })
     await fire($, 'command.run', command('   '))
     assert.equal((await fire($, 'prompt.submit', prompt(text))).passed, true, JSON.stringify(text))
     assert.equal((await fire($, 'prompt.submit', prompt('later text'))).passed, true, 'capture cleared')
@@ -145,7 +145,7 @@ test('a slash command or a blank prompt from the user cancels the capture', asyn
 
 test('a prompt from a non-user origin passes by and leaves the capture pending', async () => {
   resetCapture()
-  const dir = await repo(); const { $, fire } = session(dir)
+  const dir = await repo(); const { $, fire } = session(dir, { surfaces: [] })
   await fire($, 'command.run', command(''))
   assert.equal((await fire($, 'prompt.submit', prompt('from a task', 'task-notification'))).passed, true)
   await assert.rejects(read(dir), 'the notification is not an item')
