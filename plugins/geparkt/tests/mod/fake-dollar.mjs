@@ -26,9 +26,9 @@ export function recorder() {
   return { on, fire }
 }
 
-export function fakeDollar({ cwd, sessionId = 's1', surfaces = ['terminal'], toolCheck = { decision: 'allow' }, commands = [], todoReply = 'Added to todo list: x' } = {}) {
+export function fakeDollar({ cwd, sessionId = 's1', surfaces = ['terminal'], toolCheck = { decision: 'allow' }, commands = [], todoReply = 'Added to todo list: x', registerThrows = false } = {}) {
   const state = new Map()
-  const log = { toasts: [], opened: [], closed: [], fills: [], commands: [] }
+  const log = { toasts: [], opened: [], closed: [], fills: [], commands: [], registered: [] }
   const element = (type) => (props) => ({ type, ...props })
   return {
     log,
@@ -46,6 +46,11 @@ export function fakeDollar({ cwd, sessionId = 's1', surfaces = ['terminal'], too
     tool: { check: async () => toolCheck },
     prompt: { fill: async (input) => { log.fills.push(input); return { isFilled: true } } },
     command: {
+      register: async (spec) => {
+        if (registerThrows) throw new Error(`"/${spec.name}" refused: it is the plugin's /geparkt:track`)
+        log.registered.push(spec)
+        return { command: spec.name }
+      },
       list: async () => commands.map((name) => ({ name })),
       run: async (input) => { log.commands.push(input); return { text: todoReply } },
     },

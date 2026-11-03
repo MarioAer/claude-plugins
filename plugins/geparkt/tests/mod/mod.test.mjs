@@ -15,8 +15,8 @@ async function repo() {
 function session(dir, options = {}) {
   const $ = fakeDollar({ cwd: dir, ...options }); const { on, fire } = recorder(); register(on); return { $, fire }
 }
-const skill = (args) => ({ tool: 'Skill', skill: 'geparkt:geparkt', args })
-const command = (args = '') => ({ command: 'geparkt:geparkt', args, origin: { kind: 'composer' } })
+const skill = (args) => ({ tool: 'Skill', skill: 'geparkt:track', args })
+const command = (args = '') => ({ command: 'geparkt:track', args, origin: { kind: 'composer' } })
 const band = { component: 'AbovePrompt', surface: 'terminal', props: {} }
 const paneSite = { component: 'Pane', surface: 'terminal', requestId: 'geparkt-review', props: { isFocused: true } }
 const press = (tree, key) => find(tree, (n) => n.type === 'Button' && n.key === key).onPress({ surface: 'terminal' })
@@ -270,4 +270,27 @@ test('git is asked for the root once per working directory', async () => {
   await fire($, 'tool.call', skill('+q A?'))
   await fire($, 'tool.call', skill('r1'))
   assert.equal(calls, 1)
+})
+
+test('session.start registers /geparkt as immediate', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  assert.equal((await fire($, 'session.start', {})).passed, true)
+  assert.equal($.log.registered.length, 1)
+  assert.deepEqual({ ...$.log.registered[0], description: 'x' }, { name: 'geparkt', description: 'x', argumentHint: '[list]', immediate: true })
+})
+
+test('a refused /geparkt registration toasts once and session.start still passes on', async () => {
+  const dir = await repo(); const { $, fire } = session(dir, { registerThrows: true })
+  assert.equal((await fire($, 'session.start', {})).passed, true)
+  assert.equal((await fire($, 'session.start', {})).passed, true)
+  assert.equal($.log.toasts.filter((t) => /use \/geparkt:track/.test(t)).length, 1)
+})
+
+test('typed /geparkt and /geparkt:track both answer', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  for (const name of ['geparkt', 'geparkt:track']) {
+    const { passed, out } = await fire($, 'command.run', { command: name, args: 'list', origin: { kind: 'composer' } })
+    assert.equal(passed, false, name)
+    assert.equal(out.text, 'No open threads.')
+  }
 })

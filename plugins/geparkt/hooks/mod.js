@@ -3,7 +3,7 @@
 // Thread text never reaches a shell: subprocesses take argument vectors and the text is never one.
 import * as store from './store.js'
 
-const SKILL = 'geparkt:geparkt'
+const SKILL = 'geparkt:track'
 const PANE = 'geparkt-review'
 const INSIDE = 'the session directory is inside .git or .claude'
 
@@ -66,13 +66,27 @@ function refresh($, io, root, sessionId) {
   })
 }
 
-// Loads this session's threads, so the band is right after a resume or a reload.
+// The mod's own /geparkt, registered as immediate so the review opens while Claude is mid-turn.
+// A skill may not share a registered command's name, which is why the skill is named track.
+const COMMAND = 'geparkt'
+// The fallback toast for a refused registration is shown once per mod load.
+let warned = false
+
+// Loads this session's threads, so the band is right after a resume or a reload, then registers
+// /geparkt last: a refusal (an older engine, or a name taken by another plugin) leaves
+// /geparkt:track, which waits for the turn to end, and one toast says so.
 async function startSession($, e, next) {
   const result = await next(e)
   try {
     const { io, root, sessionId } = await where($)
     if (!store.rootRefused(root)) await refresh($, io, root, sessionId)
   } catch { /* the band stays empty */ }
+  try {
+    await $.command.register({ name: COMMAND, description: 'Review the open questions and parked topics, also while Claude is working', argumentHint: '[list]', immediate: true })
+  } catch {
+    if (!warned) $.ui.toast('Mid-turn /geparkt is unavailable here; use /geparkt:track')
+    warned = true
+  }
   return result
 }
 
@@ -321,7 +335,8 @@ function modsIo($) {
 export const register = (on) => {
   on('session.start', startSession)
   on('tool.call', { tool: 'Skill' }, callSkill)
-  on('command.run', { command: 'geparkt:geparkt' }, runCommand)
+  on('command.run', { command: SKILL }, runCommand)
+  on('command.run', { command: COMMAND }, runCommand)
   on('ui.render', { component: 'AbovePrompt' }, renderBand)
   on('ui.render', { component: 'Pane', requestId: 'geparkt-review' }, renderPane)
   on('ui.close', { id: 'geparkt-review' }, closePane)

@@ -28,7 +28,11 @@ Keeps track of the questions Claude asks and the topics it parks. Claude asks th
 
 In the pane: `j`/`k` move, `b` puts the thread back in the prompt box as a draft (`Back to #3: …`) and closes the pane, `d` resolves, `x` drops, `n` adds a note, `f` twice defers the thread to the [todo](../todo) plugin as `<text> #question`, `q` closes.
 
-If another skill or command already uses the name `geparkt`, use `/geparkt:geparkt`.
+If another skill or command already uses the name `geparkt`, use `/geparkt:track`.
+
+With the mod loaded, `/geparkt` is an immediate command: it opens the review or prints the list while Claude is working, instead of waiting for the turn to end. Where the engine refuses the registration, one toast says so and `/geparkt:track` works as before.
+
+Upgrading from 0.1: the skill is now `track`, so the namespaced command is `/geparkt:track` (formerly `/geparkt:geparkt`), and a `Skill(geparkt:geparkt)` permission rule must be renamed to `Skill(geparkt:track)`.
 
 ## Storage
 
@@ -46,7 +50,7 @@ On Claude Code before 2.1.287, with `--safe-mode`, `disableAllHooks` or wherever
 ## Permissions
 
 - The mod and the hook write only `<root>/.geparkt/` (the session's file and `.gitignore`), refuse symlinks there and session ids that are not plain names, and run only `git rev-parse` with fixed arguments. Thread text is never a subprocess argument.
-- The mod answers Claude's own `Skill(geparkt:geparkt)` call itself, only when the engine's permission decision is allow: an `ask` or `deny` rule on `Skill(geparkt:geparkt)` goes to the engine, which prompts or refuses (the fallback hook then records an allowed call, and the band is redrawn from the file after it). No other tool call is answered or approved.
+- The mod answers Claude's own `Skill(geparkt:track)` call itself, only when the engine's permission decision is allow: an `ask` or `deny` rule on `Skill(geparkt:track)` goes to the engine, which prompts or refuses (the fallback hook then records an allowed call, and the band is redrawn from the file after it). No other tool call is answered or approved.
 - Deferring to todo runs `/todo` through Claude Code's command API, only after the second `f`, and only when a `todo:todo` command exists.
 
 ## License

@@ -1,5 +1,5 @@
 ---
-name: geparkt
+name: track
 description: Track the questions you ask the user and the topics you park, so none are forgotten. Call it at the end of a turn that asked, answered or parked something; the user types /geparkt to review open threads.
 argument-hint: "[+q question | +t topic | r<id> decision | x<id>]"
 ---

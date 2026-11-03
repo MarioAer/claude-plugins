@@ -1,6 +1,6 @@
 {
   "name": "geparkt",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Keeps track of the questions Claude asks and the topics it parks, so none get lost down a rabbit hole.",
   "types": "./types/index.d.ts",
   "author": {
