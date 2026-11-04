@@ -97,6 +97,13 @@ export function stage(thread) {
   return thread.reply.sentAt === null ? 'waiting' : 'sent'
 }
 
+// Open threads by stage; the pane draws and navigates them in this order: needs, waiting, sent.
+export function sections(threads) {
+  const out = { needs: [], waiting: [], sent: [] }
+  for (const t of threads) if (t.status === 'open') out[stage(t)].push(t)
+  return out
+}
+
 // Replies the next prompt must carry, on any thread, closed ones included.
 export function unsentReplies(data) {
   return data.threads.filter((t) => t.reply && t.reply.sentAt === null)

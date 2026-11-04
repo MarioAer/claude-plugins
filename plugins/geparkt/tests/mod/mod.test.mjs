@@ -105,7 +105,7 @@ test('/geparkt lists without a surface and opens the pane with one', async () =>
   assert.match((await fire($, 'command.run', command('list'))).out.text, /^#1 question/)
 })
 
-test('pane: resolve, note, back and close', async () => {
+test('pane: resolve, reply, back and close', async () => {
   const dir = await repo(); const { $, fire } = session(dir)
   await fire($, 'tool.call', skill('+q A? | +t B | +q C?'))
   await fire($, 'command.run', command())
@@ -116,14 +116,130 @@ test('pane: resolve, note, back and close', async () => {
   const data = await fileOf(dir)
   assert.deepEqual(data.threads.map((t) => [t.id, t.status, t.by]), [[1, 'open', null], [2, 'resolved', 'user'], [3, 'open', null]])
   tree = (await fire($, 'ui.render', paneSite)).out
-  await press(tree, 'note')
+  assert.equal(find(tree, (n) => n.type === 'Button' && n.key === 'note'), null)
+  await press(tree, 'reply')
   tree = (await fire($, 'ui.render', paneSite)).out
   await find(tree, (n) => n.type === 'Input').onSubmit('ask the DBA')
-  assert.deepEqual((await fileOf(dir)).threads[2].notes.map((n) => n.text), ['ask the DBA'])
+  assert.equal((await fileOf(dir)).threads[2].reply.text, 'ask the DBA')
   tree = (await fire($, 'ui.render', paneSite)).out
   await press(tree, 'back')
   assert.deepEqual($.log.fills[0], { text: 'Back to #3: C? ', mode: 'replace' })
   assert.deepEqual($.log.closed, ['geparkt-review'])
+})
+
+async function paneOn(skillArgs, options) {
+  const dir = await repo(); const { $, fire } = session(dir, options)
+  await fire($, 'tool.call', skill(skillArgs))
+  await fire($, 'command.run', command())
+  const render = async () => (await fire($, 'ui.render', paneSite)).out
+  const view = async () => (await $.state.get({ plugin: 'geparkt', key: 'view' })).value
+  const input = async () => find(await render(), (n) => n.type === 'Input')
+  return { dir, $, fire, render, view, input }
+}
+
+test('pane: reply saves on the selected thread and moves it to waiting', async () => {
+  const { dir, $, render, input } = await paneOn('+q A? | +q B?')
+  await press(await render(), 'reply')
+  await (await input()).onSubmit('yes')
+  const reply = (await fileOf(dir)).threads[0].reply
+  assert.equal(reply.text, 'yes')
+  assert.equal(reply.sentAt, null)
+  assert.ok($.log.toasts.includes('Reply saved: yes'))
+  assert.equal(await input(), null)
+})
+
+test('pane: the save button saves the draft of the selected thread', async () => {
+  const { dir, render, input } = await paneOn('+q A?')
+  await press(await render(), 'reply')
+  await (await input()).onInput('draft text')
+  await press(await render(), 'save')
+  assert.equal((await fileOf(dir)).threads[0].reply.text, 'draft text')
+})
+
+test('pane: empty reply cancels', async () => {
+  const { dir, render, view, input } = await paneOn('+q A?')
+  await press(await render(), 'reply')
+  assert.notEqual((await view()).pane.replyFor, null)
+  await (await input()).onSubmit('  ')
+  assert.equal((await fileOf(dir)).threads[0].reply, undefined)
+  const { pane } = await view()
+  assert.equal(pane.replyFor, null)
+  assert.deepEqual(pane.drafts, {})
+})
+
+test('pane: a reply on a sent thread starts a follow-up', async () => {
+  const { dir, $, fire, render, input } = await paneOn('+q A?')
+  const data = await fileOf(dir)
+  data.threads[0].reply = { text: 'first', at: 5, sentAt: 6 }
+  await writeFile(join(dir, '.geparkt/s1.json'), JSON.stringify(data))
+  await fire($, 'tool.call', skill('+t B'))
+  await press(await render(), 'reply')
+  await (await input()).onSubmit('follow-up')
+  const reply = (await fileOf(dir)).threads[0].reply
+  assert.equal(reply.text, 'follow-up')
+  assert.equal(reply.sentAt, null)
+})
+
+test('pane: resolving discards an unsent reply with a toast', async () => {
+  const { dir, $, render, input } = await paneOn('+q A? | +q B?')
+  await press(await render(), 'reply')
+  await (await input()).onSubmit('yes')
+  await press(await render(), 'resolve')
+  assert.match($.log.toasts.at(-1), /unsent reply discarded: yes$/)
+  const data = await fileOf(dir)
+  assert.equal(data.threads[0].status, 'resolved')
+  assert.equal(data.threads[0].reply, null)
+})
+
+test('pane: resolving keeps a sent reply and adds no discard note', async () => {
+  const { dir, $, fire, render } = await paneOn('+q A? | +q B?')
+  const data = await fileOf(dir)
+  data.threads[0].reply = { text: 'first', at: 5, sentAt: 6 }
+  await writeFile(join(dir, '.geparkt/s1.json'), JSON.stringify(data))
+  await fire($, 'tool.call', skill('+t C'))
+  await press(await render(), 'resolve')
+  assert.equal($.log.toasts.at(-1), 'Resolved: A?')
+  assert.equal((await fileOf(dir)).threads[0].reply.text, 'first')
+})
+
+test('selection follows the next thread when the selected one closes', async () => {
+  const { $, fire, render, view, input } = await paneOn('+q A? | +q B? | +q C?')
+  await press(await render(), 'down')
+  await press(await render(), 'reply')
+  await (await input()).onInput('half typed')
+  await fire($, 'tool.call', skill('r2'))
+  const { pane } = await view()
+  assert.equal(pane.selected, 3)
+  assert.equal(pane.drafts['2'], 'half typed')
+})
+
+test('selection falls back to the last thread when none follows', async () => {
+  const { $, fire, render, view } = await paneOn('+q A? | +q B? | +q C?')
+  await press(await render(), 'down')
+  await press(await render(), 'down')
+  await fire($, 'tool.call', skill('r3'))
+  assert.equal((await view()).pane.selected, 2)
+})
+
+test('a reply moves its thread to waiting and keeps the selection on it', async () => {
+  const { render, view, input } = await paneOn('+q A? | +q B?')
+  await press(await render(), 'reply')
+  await (await input()).onSubmit('yes')
+  assert.equal((await view()).pane.selected, 1)
+  // #1 now waits, so it follows #2 in the navigation order.
+  await press(await render(), 'down')
+  assert.equal((await view()).pane.selected, 1)
+  await press(await render(), 'up')
+  assert.equal((await view()).pane.selected, 2)
+})
+
+test('drafts survive moving the selection', async () => {
+  const { render, input } = await paneOn('+q A? | +q B?')
+  await press(await render(), 'reply')
+  await (await input()).onInput('keep me')
+  await press(await render(), 'down')
+  await press(await render(), 'up')
+  assert.equal((await input()).value, 'keep me')
 })
 
 test('pane: defer asks once, then hands the thread to todo', async () => {
@@ -149,20 +265,15 @@ test('pane: defer without the todo plugin changes nothing', async () => {
   assert.equal((await fileOf(dir)).threads[0].status, 'open')
 })
 
-test('a note goes to the thread n was pressed on, even after the list moved', async () => {
-  const dir = await repo(); const { $, fire } = session(dir)
-  await fire($, 'tool.call', skill('+q A? | +q B? | +q C?'))
-  await fire($, 'command.run', command())
-  let tree = (await fire($, 'ui.render', paneSite)).out
-  await press(tree, 'down')
-  tree = (await fire($, 'ui.render', paneSite)).out
-  await press(tree, 'note')
-  // Claude resolves #1 meanwhile: the list shifts and the cursor's index now names #3.
+test('a reply goes to the thread reply was pressed on, even after the list moved', async () => {
+  const { dir, $, fire, render, input } = await paneOn('+q A? | +q B? | +q C?')
+  await press(await render(), 'down')
+  await press(await render(), 'reply')
+  // Claude resolves #1 meanwhile: the list shifts, the selection stays on #2.
   await fire($, 'tool.call', skill('r1'))
-  tree = (await fire($, 'ui.render', paneSite)).out
-  await find(tree, (n) => n.type === 'Input').onSubmit('only for B')
+  await (await input()).onSubmit('only for B')
   const threads = (await fileOf(dir)).threads
-  assert.deepEqual(threads.map((t) => t.notes.length), [0, 1, 0])
+  assert.deepEqual(threads.map((t) => t.reply?.text ?? null), [null, 'only for B', null])
 })
 
 test('a pane key during Claude\'s call does not overwrite either change', async () => {
@@ -213,17 +324,17 @@ test('an approved ask call redraws the band from the file the fallback hook wrot
   assert.equal((await fire($, 'ui.render', band)).passed, false)
 })
 
-test('a note started while Claude\'s call redraws the view is kept', async () => {
+test('a reply started while Claude\'s call redraws the view is kept', async () => {
   const dir = await repo(); const { $, fire } = session(dir)
   await fire($, 'tool.call', skill('+q A?'))
   await fire($, 'command.run', command())
   const tree = (await fire($, 'ui.render', paneSite)).out
-  // The note key lands between the redraw's read of the view and its write.
+  // The reply key lands between the redraw's read of the view and its write.
   const get = $.state.get
   let armed = false
   $.state.get = async (ref) => {
     const value = await get(ref)
-    if (armed) { armed = false; await press(tree, 'note') }
+    if (armed) { armed = false; await press(tree, 'reply') }
     return value
   }
   const read = $.fs.read

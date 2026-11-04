@@ -25,9 +25,9 @@ export type Thread = {
 }
 
 export type ReviewPane = {
-  index: number
-  noteFor: number | null
-  draft: string | null
+  selected: number | null
+  replyFor: number | null
+  drafts: Record<string, string>
   deferFor: number | null
   resolved: number
 }

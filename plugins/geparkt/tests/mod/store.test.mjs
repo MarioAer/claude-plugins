@@ -139,3 +139,18 @@ test('validData accepts threads with and without reply', () => {
   const base = { version: 1, next: 3, threads: [thread({ id: 1 }), thread({ id: 2, reply: { text: 'a', at: 1, sentAt: null } })] }
   assert.equal(store.validData(base), true)
 })
+
+test('sections groups open threads by reply state', () => {
+  const threads = [
+    thread({ id: 1 }),
+    thread({ id: 2, reply: { text: 'a', at: 1, sentAt: null } }),
+    thread({ id: 3, reply: { text: 'b', at: 1, sentAt: 9 } }),
+    thread({ id: 4, reply: { text: 'c', at: 1, sentAt: null } }),
+    thread({ id: 5, status: 'resolved' }),
+    thread({ id: 6 }),
+  ]
+  const { needs, waiting, sent } = store.sections(threads)
+  assert.deepEqual(needs.map((t) => t.id), [1, 6])
+  assert.deepEqual(waiting.map((t) => t.id), [2, 4])
+  assert.deepEqual(sent.map((t) => t.id), [3])
+})

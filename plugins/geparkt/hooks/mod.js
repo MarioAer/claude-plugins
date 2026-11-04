@@ -34,8 +34,24 @@ function serial(fn) {
   return run
 }
 
-// The open threads go into the view and the pane's cursor is clamped, on the pane as it is at the
-// write. An emptied list closes the pane; closePane then clears it, after its summary toast.
+// The navigation order: threads that need a reply, then those with a reply waiting, then sent ones.
+function order(threads) {
+  const { needs, waiting, sent } = store.sections(threads)
+  return [...needs, ...waiting, ...sent]
+}
+
+// The pane's selection after the open threads changed, by id. It stays on a thread that is still
+// open, else moves to the one that followed it in the previous order, else to the last.
+function reselect(selected, before, after) {
+  if (after.length === 0) return null
+  if (after.includes(selected)) return selected
+  if (selected === null) return after[0]
+  const index = before.indexOf(selected)
+  return (index < 0 ? undefined : before.slice(index + 1).find((id) => after.includes(id))) ?? after[after.length - 1]
+}
+
+// The open threads go into the view and the pane's selection follows them, on the pane as it is at
+// the write. An emptied list closes the pane; closePane then clears it, after its summary toast.
 // Called only inside serial(), so views are written in the order the file was.
 async function publish($, root, sessionId, data) {
   const threads = store.openThreads(data)
@@ -43,7 +59,12 @@ async function publish($, root, sessionId, data) {
   let emptied = false
   await setView($, (v) => {
     emptied = v.pane !== null && threads.length === 0
-    const pane = v.pane && { ...v.pane, index: Math.max(0, Math.min(v.pane.index, threads.length - 1)) }
+    const after = order(threads).map((t) => t.id)
+    const pane = v.pane && {
+      ...v.pane,
+      selected: reselect(v.pane.selected, order(v.threads).map((t) => t.id), after),
+      replyFor: after.includes(v.pane.replyFor) ? v.pane.replyFor : null,
+    }
     return { ...v, root, sessionId, threads, unsent, pane }
   })
   if (emptied) await $.ui.close({ id: PANE })
@@ -222,65 +243,101 @@ async function renderBand($, e, next) {
 }
 
 async function openPane($) {
-  const pane = { index: 0, noteFor: null, draft: null, deferFor: null, resolved: 0 }
-  await setView($, (v) => ({ ...v, pane }))
+  await setView($, (v) => ({ ...v, pane: { selected: order(v.threads)[0]?.id ?? null, replyFor: null, drafts: {}, deferFor: null, resolved: 0 } }))
   await $.ui.open({ id: PANE, title: 'Geparkt', focus: true, closeOnEscape: true })
 }
 
-async function move($, to) {
-  await setView($, (v) => v.pane === null || v.threads.length === 0 ? v
-    : { ...v, pane: { ...v.pane, index: Math.max(0, Math.min(v.threads.length - 1, to(v.pane.index, v.threads.length))) } })
+// The thread the pane has selected, or undefined.
+const selectedOf = (view) => view.pane && view.threads.find((t) => t.id === view.pane.selected)
+
+// Steps the selection through the navigation order by id; it stops at either end.
+async function move($, delta) {
+  await setView($, (v) => {
+    const ids = order(v.threads).map((t) => t.id)
+    if (v.pane === null || ids.length === 0) return v
+    const at = ids.indexOf(v.pane.selected)
+    const selected = ids[at < 0 ? 0 : Math.max(0, Math.min(ids.length - 1, at + delta))]
+    return { ...v, pane: { ...v.pane, selected } }
+  })
 }
 
-// Applies fn to a thread in the file (by default the cursor's) and refreshes the view from what
-// was written. counts(pane) gives the pane fields a change adds to, read at the write.
-async function act($, label, fn, counts = () => ({}), id = null) {
+const oneLine = (text) => store.clip(text.replace(/\s+/g, ' '))
+
+// What closing a thread from the pane does to a reply Claude has not seen: it is dropped, and the
+// toast says so. A sent reply stays on the thread.
+function discardUnsent(thread) {
+  if (!thread.reply || thread.reply.sentAt !== null) return ''
+  const text = thread.reply.text
+  thread.reply = null
+  return `; unsent reply discarded: ${oneLine(text)}`
+}
+
+// Applies fn to a thread in the file (by default the selected one) and refreshes the view from what
+// was written. fn may return text for the end of the toast. Options: counts(pane) gives the pane
+// fields a change adds to, read at the write; id names another thread; subject replaces the
+// thread's text in the toast.
+async function act($, label, fn, { counts = () => ({}), id = null, subject = null } = {}) {
   const view = await getView($)
   if (view.pane === null) return
-  const thread = id === null ? view.threads[view.pane.index] : view.threads.find((t) => t.id === id)
+  const thread = id === null ? selectedOf(view) : view.threads.find((t) => t.id === id)
   if (!thread) {
     if (id !== null) $.ui.toast(`Thread #${id} is no longer open`)
-    await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: null, draft: null, deferFor: null } }))
+    await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, replyFor: null, deferFor: null } }))
     return
   }
+  let extra = ''
   try {
     const ok = await serial(async () => {
-      const { data, ok } = await store.change(modsIo($), view.root, view.sessionId, thread.id, fn)
-      await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, ...(ok ? counts(v.pane) : {}), noteFor: null, draft: null, deferFor: null } }))
+      const { data, ok } = await store.change(modsIo($), view.root, view.sessionId, thread.id, (t, now) => { extra = fn(t, now) ?? '' })
+      await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, ...(ok ? counts(v.pane) : {}), replyFor: null, deferFor: null } }))
       await publish($, view.root, view.sessionId, data)
       return ok
     })
-    $.ui.toast(ok ? `${label}: ${store.clip(thread.text)}` : `Thread #${thread.id} is no longer open`)
+    $.ui.toast(ok ? `${label}: ${subject ?? store.clip(thread.text)}${extra}` : `Thread #${thread.id} is no longer open`)
   } catch (error) {
     if (!(error instanceof store.Refused)) throw error
     $.ui.toast(`Geparkt failed: ${error.message}`)
   }
 }
 
-const resolveAction = ($) => act($, 'Resolved', (t) => { t.status = 'resolved'; t.by = 'user' }, (pane) => ({ resolved: pane.resolved + 1 }))
+const resolveAction = ($) => act($, 'Resolved', (t) => { t.status = 'resolved'; t.by = 'user'; return discardUnsent(t) }, { counts: (pane) => ({ resolved: pane.resolved + 1 }) })
 
-const dropAction = ($) => act($, 'Dropped', (t) => { t.status = 'dropped'; t.by = 'user' })
+const dropAction = ($) => act($, 'Dropped', (t) => { t.status = 'dropped'; t.by = 'user'; return discardUnsent(t) })
 
-// The note goes to the thread n was pressed on, wherever the cursor is by now.
-async function noteAction($, value) {
-  const view = await getView($)
-  const target = view.pane?.noteFor ?? null
-  const text = store.cut(store.normalize(value).replace(/\s+/g, ' '), store.MAX_TEXT)
-  if (target === null || text === '') {
-    await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: null, draft: null } }))
-    return
-  }
-  await act($, 'Noted', (t, now) => { t.notes.push({ at: now, text }) }, () => ({}), target)
+const without = (drafts, id) => Object.fromEntries(Object.entries(drafts).filter(([key]) => key !== String(id)))
+
+// Opens the reply input on the selected thread; its draft, if any, is shown in it.
+async function replyAction($) {
+  await setView($, (v) => v.pane === null || v.pane.selected === null ? v : { ...v, pane: { ...v.pane, replyFor: v.pane.selected } })
 }
 
-async function setDraft($, value) {
-  await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, draft: value } }))
+async function draftReply($, id, value) {
+  await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, drafts: { ...v.pane.drafts, [String(id)]: value } } }))
+}
+
+// Saves the reply on the thread it was typed for. An empty reply only closes the input. A reply
+// replaces the one before, also a sent one, and waits for the next typed prompt.
+async function saveReply($, id, value) {
+  if (id === null) return
+  const text = store.replyText(value)
+  if (text === '') {
+    await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, replyFor: null, drafts: without(v.pane.drafts, id) } }))
+    return
+  }
+  await act($, 'Reply saved', (t, now) => { t.reply = { text, at: now, sentAt: null } }, { id, subject: oneLine(text), counts: (pane) => ({ drafts: without(pane.drafts, id) }) })
+}
+
+// The save button: the draft as it is when the key is pressed, not as it was when drawn.
+async function saveDraft($) {
+  const { pane } = await getView($)
+  const id = pane?.replyFor ?? pane?.selected ?? null
+  if (id !== null) await saveReply($, id, pane.drafts[String(id)] ?? '')
 }
 
 // Puts the thread back in the prompt box as a draft; no turn starts until the person sends it.
 async function backAction($) {
   const view = await getView($)
-  const thread = view.pane && view.threads[view.pane.index]
+  const thread = selectedOf(view)
   if (!thread) return
   const { isFilled } = await $.prompt.fill({ text: `Back to #${thread.id}: ${thread.text} `, mode: 'replace' })
   if (!isFilled) { $.ui.toast('The prompt box is not available'); return }
@@ -305,7 +362,7 @@ async function todoCommand($) {
 async function deferAction($) {
   const view = await getView($)
   if (view.pane === null) return
-  const thread = view.threads[view.pane.index]
+  const thread = selectedOf(view)
   if (!thread) return
   const command = await todoCommand($)
   if (command === null) { $.ui.toast('Defer needs the todo plugin'); return }
@@ -320,7 +377,7 @@ async function deferAction($) {
     await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, deferFor: null } }))
     return
   }
-  await act($, 'Deferred to todo', (t) => { t.status = 'deferred'; t.by = 'user' })
+  await act($, 'Deferred to todo', (t) => { t.status = 'deferred'; t.by = 'user'; return discardUnsent(t) })
 }
 
 async function renderPane($, e, next) {
@@ -330,10 +387,11 @@ async function renderPane($, e, next) {
   const { Box, Text, Button, Input } = $.ui.resolve(e)
   const focused = e.props?.isFocused === true
   const now = Date.now()
-  const current = view.threads[pane.index]
+  const threads = order(view.threads)
+  const current = threads.find((t) => t.id === pane.selected) ?? threads[0]
 
-  const rows = view.threads.map((t, i) => {
-    const isCursor = i === pane.index
+  const rows = threads.map((t) => {
+    const isCursor = t.id === current.id
     const mark = isCursor ? (focused ? '▶' : '▷') : ' '
     return Box({ gap: 1, children: [
       Text({ bold: isCursor, inverse: isCursor && focused, dimColor: !isCursor && store.isStale(t, now), wrap: 'truncate', children: `${mark} #${t.id} ${t.text}` }),
@@ -343,40 +401,39 @@ async function renderPane($, e, next) {
   })
   const list = Box({ flexDirection: 'column', borderStyle: 'single', paddingX: 1, ...(focused ? { borderColor: 'cyan' } : { borderDimColor: true }), children: [
     Box({ gap: 2, children: [
-      Text({ bold: true, children: `Geparkt · ${view.threads.length} open · ${pane.resolved} resolved` }),
+      Text({ bold: true, children: `Geparkt · ${threads.length} open · ${pane.resolved} resolved` }),
       focused ? Text({ color: 'green', children: '● keys active' }) : Text({ dimColor: true, children: '○ not focused' }),
     ] }),
     ...rows,
   ] })
 
-  const notes = current.notes ?? []
+  const reply = current.reply
   const card = Box({ flexDirection: 'column', borderStyle: 'round', paddingX: 1, ...(focused ? {} : { borderDimColor: true }), children: [
     Text({ bold: true, wrap: 'wrap', children: current.text }),
     Text({ dimColor: true, children: `${store.KINDS[current.kind]} · parked ${store.age(current, now)} ago${store.isStale(current, now) ? ' · stale' : ''}` }),
-    ...(notes.length === 0 ? [Text({ dimColor: true, children: 'No notes. n adds one.' })] : notes.map((note) => Text({ wrap: 'wrap', children: `· ${note.text}` }))),
+    reply ? Text({ wrap: 'wrap', children: `Reply (${store.stage(current)}): ${reply.text}` }) : Text({ dimColor: true, children: 'No reply. r adds one.' }),
   ] })
 
-  let controls
-  let help
-  if (pane.noteFor !== null) {
-    controls = [Input({ key: 'note', label: 'Note', placeholder: 'empty cancels', value: pane.draft ?? '', submitLabel: 'save', autoFocus: true, onInput: (value) => setDraft($, value), onSubmit: (value) => noteAction($, value) })]
-    help = 'Enter saves the note, empty Enter cancels, Esc returns to the prompt.'
-  } else {
-    const key = (name, label, hotkey, onPress) => Button({ key: name, label, hotkey, plain: true, ...(focused ? {} : { dimColor: true }), onPress })
-    controls = [
-      Box({ columnGap: 2, flexWrap: 'wrap', children: [
-        key('down', 'down', 'j', () => move($, (i) => i + 1)),
-        key('up', 'up', 'k', () => move($, (i) => i - 1)),
-        key('back', 'back to it', 'b', () => backAction($)),
-        key('resolve', 'resolve', 'd', () => resolveAction($)),
-        key('drop', 'drop', 'x', () => dropAction($)),
-        key('note', 'note', 'n', () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: v.threads[v.pane.index]?.id ?? null, draft: '' } }))),
-        key('defer', pane.deferFor === current.id ? 'defer: press f again' : 'defer to todo', 'f', () => deferAction($)),
-        key('close', 'close', 'q', () => $.ui.close({ id: PANE })),
-      ] }),
-    ]
-    help = focused ? 'b puts the thread in the prompt box. Esc returns to the prompt.' : 'ctrl+x tab to focus · keys go to the prompt'
+  // While the input is open the hotkeys are off, so typing j or k reaches the input.
+  const typing = pane.replyFor === current.id
+  const key = (name, label, hotkey, onPress) => Button({ key: name, label, ...(typing ? {} : { hotkey }), plain: true, ...(focused ? {} : { dimColor: true }), onPress })
+  const controls = []
+  if (typing) {
+    const id = current.id
+    controls.push(Input({ key: 'reply-input', label: 'Reply', placeholder: 'empty cancels', value: pane.drafts[String(id)] ?? '', submitLabel: 'save', autoFocus: true, onInput: (value) => draftReply($, id, value), onSubmit: (value) => saveReply($, id, value) }))
   }
+  controls.push(Box({ columnGap: 2, flexWrap: 'wrap', children: [
+    key('down', 'down', 'j', () => move($, 1)),
+    key('up', 'up', 'k', () => move($, -1)),
+    key('back', 'back to it', 'b', () => backAction($)),
+    key('resolve', 'resolve', 'd', () => resolveAction($)),
+    key('drop', 'drop', 'x', () => dropAction($)),
+    typing ? key('save', 'save', 's', () => saveDraft($)) : key('reply', 'reply', 'r', () => replyAction($)),
+    key('defer', pane.deferFor === current.id ? 'defer: press f again' : 'defer to todo', 'f', () => deferAction($)),
+    key('close', 'close', 'q', () => $.ui.close({ id: PANE })),
+  ] }))
+  const help = typing ? 'Enter saves the reply, empty Enter cancels, Esc returns to the prompt.'
+    : focused ? 'b puts the thread in the prompt box. Esc returns to the prompt.' : 'ctrl+x tab to focus · keys go to the prompt'
   return Box({ flexDirection: 'column', gap: 1, children: [list, card, Box({ flexDirection: 'column', children: controls }), Text({ dimColor: true, wrap: 'wrap', children: help })] })
 }
 
