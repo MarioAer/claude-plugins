@@ -12,13 +12,13 @@ export function recorder() {
     return { catch() {} }
   }
   // Runs the registered hooks for event in order; next() past the last one stands for core, whose
-  // result fields can be given as core.
+  // result fields can be given as core: an object, or an async function of the input.
   async function fire($, event, e, core = {}) {
     const chain = hooks.filter((h) => h.event === event && Object.entries(h.matcher).every(([k, v]) => e[k] === v))
     let index = 0
     const next = async (input) => {
       const hook = chain[index++]
-      if (!hook) return { [PASSED]: true, ...input, ...core }
+      if (!hook) return { [PASSED]: true, ...input, ...(typeof core === 'function' ? await core(input) : core) }
       return hook.handler($, input, next)
     }
     const out = await next(e)
