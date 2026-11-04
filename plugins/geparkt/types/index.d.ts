@@ -5,6 +5,12 @@ export type Note = {
   text: string
 }
 
+export type Reply = {
+  text: string
+  at: number
+  sentAt: number | null
+}
+
 export type Thread = {
   id: number
   kind: 'q' | 't'
@@ -15,6 +21,7 @@ export type Thread = {
   notes: Note[]
   at: number
   touched: number
+  reply?: Reply | null
 }
 
 export type ReviewPane = {

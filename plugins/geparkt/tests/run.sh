@@ -69,6 +69,12 @@ for bad in '[]' 'null' '{"next": 2, "threads": [{"id": 1}]}' '{"next": 2'; do
 done
 check "a file that does not read is refused and kept" ok
 
+printf '{"version":1,"next":2,"threads":[{"id":1,"kind":"q","text":"A?","status":"open","decision":null,"by":null,"notes":[],"at":1,"touched":1,"reply":{"text":"yes","at":1,"sentAt":null}}]}' >"$REPO/.geparkt/rp.json"
+context "$(skill_event rp "$REPO" geparkt:track 'r1 done')" >/dev/null
+if python3 -c 'import json,sys; t=json.load(open(sys.argv[1]))["threads"][0]; assert t["status"]=="resolved" and t["reply"]=={"text":"yes","at":1,"sentAt":None}' "$REPO/.geparkt/rp.json" 2>/dev/null; then
+  check "fallback keeps the reply key" ok
+else check "fallback keeps the reply key" fail "$(cat "$REPO/.geparkt/rp.json")"; fi
+
 out=$(context "$(skill_event s1 "$REPO" todo:todo 'x')")
 if [ -z "$out" ]; then check "other skills are ignored" ok; else check "other skills" fail "$out"; fi
 
