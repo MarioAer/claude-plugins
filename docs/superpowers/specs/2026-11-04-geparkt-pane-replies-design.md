@@ -122,7 +122,7 @@ TDD per repository rules. Extend `tests/mod/mod.test.mjs` and `tests/mod/store.t
 3. **Hook failure.** The `prompt.submit` hook fails open: when the session file cannot be read (`Refused`, bad file, root refused) the prompt passes unchanged and the replies stay waiting. The hook reads the file inside `serial()`, not the cached view.
 4. **Who counts as the user.** The prompt's `origin.kind` is `composer` or `bridge` (the user typing here, or from the phone or web). `auto-continuation`, `unclassified`, `plugin` (with or without `asUser`) and every other origin carry nothing.
 5. **Marking delivered.** Matched on thread id and `reply.at`, so a reply edited after the block was built stays waiting. Marking sets `touched`, so the stale clock restarts at delivery.
-6. **Newlines.** A reply keeps its line breaks (`\r` removed, ends trimmed, capped at `MAX_TEXT` code points). In the context block each reply is quoted as-is.
+6. **Newlines.** A reply keeps its line breaks (a `\r\n` or lone `\r` becomes a line break, ends trimmed, capped at `MAX_TEXT` code points). In the context block each reply is quoted as-is.
 7. **Legacy and Python-created threads.** JS reads `reply ?? null`. `apply` (JS) and `geparkt_hook.py` do not write the key, so both paths stay identical; only pane and submit actions write `reply`. The Python save must keep unknown keys; add a test for it.
 
 ## Unsent reply when the item closes (decided)
