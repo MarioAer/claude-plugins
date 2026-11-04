@@ -8,7 +8,7 @@ const PANE = 'geparkt-review'
 const INSIDE = 'the session directory is inside .git or .claude'
 
 // What the band and the pane draw from. Written only from events, never while drawing.
-const EMPTY_VIEW = { root: null, sessionId: null, threads: [], pane: null }
+const EMPTY_VIEW = { root: null, sessionId: null, threads: [], unsent: 0, pane: null }
 
 async function getView($) {
   const { value } = await $.state.get({ plugin: 'geparkt', key: 'view' })
@@ -39,11 +39,12 @@ function serial(fn) {
 // Called only inside serial(), so views are written in the order the file was.
 async function publish($, root, sessionId, data) {
   const threads = store.openThreads(data)
+  const unsent = store.unsentReplies(data).length
   let emptied = false
   await setView($, (v) => {
     emptied = v.pane !== null && threads.length === 0
     const pane = v.pane && { ...v.pane, index: Math.max(0, Math.min(v.pane.index, threads.length - 1)) }
-    return { ...v, root, sessionId, threads, pane }
+    return { ...v, root, sessionId, threads, unsent, pane }
   })
   if (emptied) await $.ui.close({ id: PANE })
 }
@@ -145,6 +146,39 @@ async function turnComplete($, e, next) {
   const line = `Geparkt: ${open} open (${delta > 0 ? '+' : ''}${delta})`
   const set = result.text !== undefined && result.text !== e.answer ? result.text : null
   return { ...result, text: set === null ? line : `${set}\n${line}` }
+}
+
+// Replies the user wrote in the pane ride on the next prompt typed here (or from the phone or
+// web), as context, so they cost no turn of their own. The file is read before the prompt goes on
+// and again after it entered the session; next(e) is never awaited inside serial(), which would hold
+// up every other change to the file for as long as the prompt takes. A reply edited in between has
+// a new `at` and stays waiting. Any failure passes the prompt on unchanged.
+async function submitPrompt($, e, next) {
+  const origin = e.origin?.kind
+  if ((origin !== 'composer' && origin !== 'bridge') || e.command !== undefined || e.isMeta === true) return next(e)
+  let sent = null
+  try {
+    const { io, root, sessionId } = await where($)
+    if (!store.rootRefused(root)) {
+      sent = await serial(async () => {
+        const waiting = store.unsentReplies(await store.load(io, root, sessionId))
+        if (waiting.length === 0) return null
+        return { io, root, sessionId, stamps: waiting.map((t) => ({ id: t.id, at: t.reply.at })), block: store.replyBlock(waiting) }
+      })
+    }
+  } catch { /* the prompt goes on without replies */ }
+  if (sent === null) return next(e)
+  const result = await next({ ...e, context: [...(e.context ?? []), sent.block] })
+  if (result.drop) return result
+  try {
+    await serial(async () => {
+      const data = await store.load(sent.io, sent.root, sent.sessionId)
+      store.markSent(data, sent.stamps, sent.io.now())
+      await store.save(sent.io, sent.root, sent.sessionId, data)
+      await publish($, sent.root, sent.sessionId, data)
+    })
+  } catch { /* the replies stay waiting */ }
+  return result
 }
 
 export function listText(threads, now) {
@@ -375,6 +409,7 @@ export const register = (on) => {
   on('tool.call', { tool: 'Skill' }, callSkill)
   on('command.run', { command: SKILL }, runCommand)
   on('command.run', { command: COMMAND }, runCommand)
+  on('prompt.submit', submitPrompt)
   on('turn.start', turnStart)
   on('turn.complete', turnComplete)
   on('ui.render', { component: 'AbovePrompt' }, renderBand)

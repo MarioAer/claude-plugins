@@ -36,6 +36,7 @@ export type View = {
   root: string | null
   sessionId: string | null
   threads: Thread[]
+  unsent: number
   pane: ReviewPane | null
 }
 

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { register } from '../../hooks/mod.js'
+import * as store from '../../hooks/store.js'
 import { fakeDollar, recorder, find } from './fake-dollar.mjs'
 
 async function repo() {
@@ -370,4 +371,91 @@ test('the geparkt turn line keeps a line another hook set', async () => {
   await fire($, 'turn.start', turn)
   await fire($, 'tool.call', skill('+q A?'))
   assert.equal((await fire($, 'turn.complete', { ...done, answer: 'A' }, { text: 'Todo: +1 this turn' })).out.text, 'Todo: +1 this turn\nGeparkt: 1 open (+1)')
+})
+
+// prompt.submit: replies ride on the next typed prompt.
+const typed = (extra = {}) => ({ text: 'go on', wait: false, origin: { kind: 'composer' }, ...extra })
+async function withReply(dir, patch = {}) {
+  const { $, fire } = session(dir)
+  await fire($, 'tool.call', skill('+q Use Postgres? | +t retry policy'))
+  const data = await fileOf(dir)
+  data.threads[0].reply = { text: 'yes, Postgres', at: 100, sentAt: null, ...patch }
+  await writeFile(join(dir, '.geparkt/s1.json'), JSON.stringify(data))
+  return { $, fire }
+}
+
+test('a typed prompt carries unsent replies once', async () => {
+  const dir = await repo(); const { $, fire } = await withReply(dir)
+  const expected = store.replyBlock(store.unsentReplies(await fileOf(dir)))
+  const { out } = await fire($, 'prompt.submit', typed())
+  assert.deepEqual(out.context, [expected])
+  assert.equal(typeof (await fileOf(dir)).threads[0].reply.sentAt, 'number')
+  const again = await fire($, 'prompt.submit', typed())
+  assert.equal(again.out.context, undefined)
+})
+
+test('only typed prompts carry replies', async () => {
+  const dir = await repo(); const { $, fire } = await withReply(dir)
+  const cases = [
+    typed({ origin: { kind: 'plugin' } }), typed({ origin: { kind: 'auto-continuation' } }), typed({ origin: { kind: 'unclassified' } }),
+    typed({ command: 'todo' }), typed({ isMeta: true }),
+  ]
+  for (const input of cases) {
+    const { out } = await fire($, 'prompt.submit', input)
+    assert.equal(out.context, undefined)
+  }
+  assert.equal((await fileOf(dir)).threads[0].reply.sentAt, null)
+  const { out } = await fire($, 'prompt.submit', typed({ origin: { kind: 'bridge' } }))
+  assert.equal(out.context.length, 1)
+})
+
+test('a dropped prompt marks nothing', async () => {
+  const dir = await repo(); const { $, fire } = await withReply(dir)
+  const { out } = await fire($, 'prompt.submit', typed(), async () => ({ drop: 'no' }))
+  assert.equal(out.drop, 'no')
+  assert.equal((await fileOf(dir)).threads[0].reply.sentAt, null)
+})
+
+test('submit fails open on a bad file', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await mkdir(join(dir, '.geparkt'), { recursive: true })
+  await writeFile(join(dir, '.geparkt/s1.json'), '[]')
+  const { passed, out } = await fire($, 'prompt.submit', typed())
+  assert.equal(passed, true)
+  assert.equal(out.context, undefined)
+  assert.equal(out.text, 'go on')
+})
+
+test('a reply edited during submit stays waiting', async () => {
+  const dir = await repo(); const { $, fire } = await withReply(dir)
+  await fire($, 'prompt.submit', typed(), async () => {
+    const data = await fileOf(dir)
+    data.threads[0].reply = { text: 'no, MySQL', at: 200, sentAt: null }
+    await writeFile(join(dir, '.geparkt/s1.json'), JSON.stringify(data))
+    return {}
+  })
+  assert.equal((await fileOf(dir)).threads[0].reply.sentAt, null)
+})
+
+test('a track call during submit is not lost', async () => {
+  const dir = await repo(); const { $, fire } = await withReply(dir)
+  await fire($, 'prompt.submit', typed(), async () => { await fire($, 'tool.call', skill('+q new?')); return {} })
+  const data = await fileOf(dir)
+  assert.ok(data.threads.some((t) => t.text === 'new?'))
+  assert.equal(typeof data.threads[0].reply.sentAt, 'number')
+})
+
+test('a reply on a thread Claude closed is sent marked after close', async () => {
+  const dir = await repo(); const { $, fire } = await withReply(dir)
+  await fire($, 'tool.call', skill('r1 postgres'))
+  const { out } = await fire($, 'prompt.submit', typed())
+  assert.match(out.context[0], /\(closed before this reply\)/)
+})
+
+test('the view counts unsent replies', async () => {
+  const dir = await repo(); const { $, fire } = await withReply(dir)
+  await fire($, 'tool.call', skill('+q another?'))
+  assert.equal((await $.state.get({ plugin: 'geparkt', key: 'view' })).value.unsent, 1)
+  await fire($, 'prompt.submit', typed())
+  assert.equal((await $.state.get({ plugin: 'geparkt', key: 'view' })).value.unsent, 0)
 })
