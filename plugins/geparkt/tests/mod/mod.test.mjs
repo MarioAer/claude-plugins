@@ -20,6 +20,7 @@ const skill = (args) => ({ tool: 'Skill', skill: 'geparkt:track', args })
 const command = (args = '') => ({ command: 'geparkt:track', args, origin: { kind: 'composer' } })
 const band = { component: 'AbovePrompt', surface: 'terminal', props: {} }
 const paneSite = { component: 'Pane', surface: 'terminal', requestId: 'geparkt-review', props: { isFocused: true } }
+const desktopSite = { ...paneSite, surface: 'desktop' }
 const press = (tree, key) => find(tree, (n) => n.type === 'Button' && n.key === key).onPress({ surface: 'terminal' })
 const fileOf = async (dir, id = 's1') => JSON.parse(await readFile(join(dir, '.geparkt', `${id}.json`), 'utf8'))
 
@@ -149,9 +150,9 @@ test('pane: reply saves on the selected thread and moves it to waiting', async (
 })
 
 test('pane: the save button saves the draft of the selected thread', async () => {
-  const { dir, render, input } = await paneOn('+q A?')
-  await press(await render(), 'reply')
-  await (await input()).onInput('draft text')
+  const { dir, $, fire } = await paneOn('+q A?')
+  const render = async () => (await fire($, 'ui.render', desktopSite)).out
+  await find(await render(), (n) => n.type === 'Input').onInput('draft text')
   await press(await render(), 'save')
   assert.equal((await fileOf(dir)).threads[0].reply.text, 'draft text')
 })
@@ -234,11 +235,13 @@ test('a reply moves its thread to waiting and keeps the selection on it', async 
 })
 
 test('drafts survive moving the selection', async () => {
-  const { render, input } = await paneOn('+q A? | +q B?')
-  await press(await render(), 'reply')
+  const { $, fire } = await paneOn('+q A? | +q B?')
+  const render = async () => (await fire($, 'ui.render', desktopSite)).out
+  const input = async () => byKey(await render(), 'reply-input')
   await (await input()).onInput('keep me')
-  await press(await render(), 'down')
-  await press(await render(), 'up')
+  await press(await render(), 'row-2')
+  assert.equal((await input()).value, '')
+  await press(await render(), 'row-1')
   assert.equal((await input()).value, 'keep me')
 })
 
@@ -569,4 +572,166 @@ test('the view counts unsent replies', async () => {
   assert.equal((await $.state.get({ plugin: 'geparkt', key: 'view' })).value.unsent, 1)
   await fire($, 'prompt.submit', typed())
   assert.equal((await $.state.get({ plugin: 'geparkt', key: 'view' })).value.unsent, 0)
+})
+
+const walk = (node, visit) => {
+  if (!node || typeof node !== 'object') return
+  visit(node)
+  for (const child of Array.isArray(node.children) ? node.children : [node.children]) walk(child, visit)
+}
+const all = (tree, pred) => { const hits = []; walk(tree, (n) => { if (pred(n)) hits.push(n) }); return hits }
+const byKey = (tree, key) => find(tree, (n) => n.key === key)
+const textOf = (node) => all(node, (n) => n.type === 'Text').map((n) => n.children).join(' ')
+
+async function withStages() {
+  const p = await paneOn('+q needs one? | +q waits? | +q sent?')
+  const data = await fileOf(p.dir)
+  data.threads[1].reply = { text: 'my answer', at: 5, sentAt: null }
+  data.threads[2].reply = { text: 'old answer', at: 5, sentAt: 6 }
+  await writeFile(join(p.dir, '.geparkt/s1.json'), JSON.stringify(data))
+  await p.fire(p.$, 'tool.call', skill('+t refresh'))
+  return p
+}
+
+test('pane groups rows into sections and hides empty ones', async () => {
+  const { dir, $, fire, render } = await paneOn('+q A? | +q B?')
+  const data = await fileOf(dir)
+  data.threads[1].reply = { text: 'x', at: 5, sentAt: 6 }
+  await writeFile(join(dir, '.geparkt/s1.json'), JSON.stringify(data))
+  await fire($, 'tool.call', skill('+t C'))
+  const tree = await render()
+  assert.ok(byKey(tree, 'section-needs'))
+  assert.ok(byKey(tree, 'section-sent'))
+  assert.equal(byKey(tree, 'section-waiting'), null)
+  assert.match(textOf(byKey(tree, 'section-needs')), /NEEDS YOU · 2/)
+  assert.match(textOf(byKey(tree, 'section-sent')), /WAITING ON CLAUDE · 1/)
+  assert.equal(all(byKey(tree, 'section-needs'), (n) => n.type === 'Button').length, 2)
+})
+
+test('the waiting section names its heading and shows each reply under its row', async () => {
+  const { render } = await withStages()
+  const tree = await render()
+  assert.match(textOf(byKey(tree, 'section-waiting')), /WAITING TO SEND · 1/)
+  const reply = find(byKey(tree, 'section-waiting'), (n) => n.type === 'Text' && typeof n.children === 'string' && n.children.startsWith('> '))
+  assert.equal(reply.children, '> my answer')
+  assert.equal(reply.dimColor, true)
+  assert.equal(find(byKey(tree, 'section-sent'), (n) => typeof n.children === 'string' && n.children.startsWith('> ')), null)
+})
+
+test('the header counts open and resolved threads', async () => {
+  const { render } = await paneOn('+q A? | +q B?')
+  const header = find(await render(), (n) => n.type === 'Text' && /^Geparkt · /.test(n.children))
+  assert.equal(header.children, 'Geparkt · 2 open')
+  assert.equal(header.weight, 'semibold')
+})
+
+test('rows are buttons that select their thread', async () => {
+  const { render, view } = await paneOn('+q A? | +q B? | +q C?')
+  const row = byKey(await render(), 'row-3')
+  assert.equal(row.type, 'Button')
+  assert.equal(row.plain, true)
+  assert.equal(row.label, '#3 C?')
+  await row.onPress({ surface: 'terminal' })
+  assert.equal((await view()).pane.selected, 3)
+})
+
+test('only the selected row wraps; the others truncate', async () => {
+  const { render } = await paneOn('+q first? | +q second?')
+  const tree = await render()
+  const wrapOf = (key) => find(byKey(tree, key), (n) => n.type === 'Text' && typeof n.children === 'string' && /\?\s*$/.test(n.children)).wrap
+  assert.equal(wrapOf('row-1'), 'wrap')
+  assert.equal(wrapOf('row-2'), 'truncate')
+})
+
+test('unselected rows are cut to the pane body width', async () => {
+  const { $, fire } = await paneOn('+q A? | +q ' + 'a'.repeat(80))
+  const site = { ...paneSite, props: { isFocused: true, bodyColumns: 30 } }
+  const tree = (await fire($, 'ui.render', site)).out
+  const text = find(byKey(tree, 'row-2'), (n) => n.type === 'Text' && /^a+/.test(n.children))
+  assert.ok([...text.children].length <= 30)
+})
+
+test('terminal hides actions while the reply input is open', async () => {
+  const { render } = await paneOn('+q A?')
+  await press(await render(), 'reply')
+  const tree = await render()
+  assert.ok(byKey(tree, 'reply-input'))
+  for (const key of ['resolve', 'back', 'drop', 'defer', 'close', 'reply', 'down', 'up']) assert.equal(byKey(tree, key), null, key)
+  assert.equal(find(tree, (n) => n.type === 'Button' && n.hotkey !== undefined), null)
+  assert.equal(byKey(tree, 'reply-input').rows, 3)
+  assert.equal(byKey(tree, 'reply-input').autoFocus, true)
+})
+
+test('terminal draws hotkeys and the key help line when the input is closed', async () => {
+  const { render } = await paneOn('+q A?')
+  const tree = await render()
+  const hotkeys = Object.fromEntries(all(tree, (n) => n.type === 'Button' && n.hotkey).map((n) => [n.key, n.hotkey]))
+  assert.deepEqual(hotkeys, { reply: 'r', resolve: 'd', back: 'b', drop: 'x', defer: 'f', close: 'q', down: 'j', up: 'k' })
+  assert.equal(byKey(tree, 'reply-input'), null)
+  assert.ok(find(tree, (n) => n.children === 'r replies · b puts it in the prompt box · Esc returns to the prompt'))
+})
+
+test('desktop draws the input always and marks primary and dismiss', async () => {
+  const { $, fire } = await paneOn('+q A?')
+  const tree = (await fire($, 'ui.render', desktopSite)).out
+  assert.ok(byKey(tree, 'reply-input'))
+  assert.equal(byKey(tree, 'save').variant, 'primary')
+  assert.equal(byKey(tree, 'close').role, 'dismiss')
+  for (const key of ['resolve', 'back', 'drop', 'defer']) assert.ok(byKey(tree, key), key)
+  assert.equal(find(tree, (n) => n.type === 'Button' && n.hotkey !== undefined), null)
+  assert.equal(find(tree, (n) => typeof n.children === 'string' && /Esc returns/.test(n.children)), null)
+})
+
+test('no element uses bold', async () => {
+  const { $, fire } = await withStages()
+  for (const site of [paneSite, desktopSite]) {
+    const tree = (await fire($, 'ui.render', site)).out
+    assert.deepEqual(all(tree, (n) => 'bold' in n), [])
+  }
+})
+
+test('the detail shows the kind line and legacy notes', async () => {
+  const { dir, $, fire, render } = await paneOn('+q A? | +t B')
+  const data = await fileOf(dir)
+  data.threads[0].notes = [{ at: 1, text: 'old note' }]
+  await writeFile(join(dir, '.geparkt/s1.json'), JSON.stringify(data))
+  await fire($, 'tool.call', skill('+t C'))
+  const tree = await render()
+  assert.ok(find(tree, (n) => n.type === 'Text' && /^question · parked \d+m ago$/.test(n.children)))
+  const note = find(tree, (n) => n.type === 'Text' && n.children === '· old note')
+  assert.equal(note.dimColor, true)
+})
+
+test('a pane state saved without drafts still renders', async () => {
+  const { $, fire, view } = await paneOn('+q A?')
+  const v = await view()
+  const { drafts, ...pane } = v.pane
+  await $.state.set({ plugin: 'geparkt', key: 'view' }, { ...v, pane: { ...pane, replyFor: 1 } })
+  const tree = (await fire($, 'ui.render', paneSite)).out
+  assert.equal(byKey(tree, 'reply-input').value, '')
+  assert.ok(byKey((await fire($, 'ui.render', desktopSite)).out, 'reply-input'))
+})
+
+test('band counts waiting replies', async () => {
+  const { $, fire, render } = await paneOn('+q A?')
+  await press(await render(), 'reply')
+  await find(await render(), (n) => n.type === 'Input').onSubmit('yes')
+  const { out } = await fire($, 'ui.render', band)
+  assert.ok(find(out, (n) => n.type === 'Text' && n.children === 'Geparkt: 1 open · 1 reply waiting'))
+})
+
+test('band pluralizes and still shows when only a reply on a closed thread waits', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'tool.call', skill('+q A? | +q B?'))
+  const data = await fileOf(dir)
+  data.threads[0].reply = { text: 'x', at: 5, sentAt: null }
+  data.threads[1].reply = { text: 'y', at: 5, sentAt: null }
+  await writeFile(join(dir, '.geparkt/s1.json'), JSON.stringify(data))
+  await fire($, 'tool.call', skill('+t C'))
+  assert.ok(find((await fire($, 'ui.render', band)).out, (n) => n.children === 'Geparkt: 3 open · 2 questions · 2 replies waiting'))
+  await fire($, 'tool.call', skill('r1 | r2 | r3'))
+  const { out, passed } = await fire($, 'ui.render', band)
+  assert.equal(passed, false)
+  assert.ok(find(out, (n) => n.children === 'Geparkt: 0 open · 2 replies waiting'))
+  assert.equal(byKey(out, 'review'), null)
 })

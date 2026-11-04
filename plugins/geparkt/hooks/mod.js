@@ -228,7 +228,8 @@ async function runCommand($, e, next) {
 
 async function renderBand($, e, next) {
   const view = await getView($)
-  if (view.threads.length === 0) return next(e)
+  const unsent = view.unsent ?? 0
+  if (view.threads.length === 0 && unsent === 0) return next(e)
   const { Box, Text, Button } = $.ui.resolve(e)
   const now = Date.now()
   const stale = view.threads.filter((t) => store.isStale(t, now)).length
@@ -236,9 +237,10 @@ async function renderBand($, e, next) {
   const parts = [`Geparkt: ${view.threads.length} open`]
   if (questions > 0 && questions < view.threads.length) parts.push(`${questions} questions`)
   if (stale > 0) parts.push(`${stale} stale`)
+  if (unsent > 0) parts.push(`${unsent} ${unsent === 1 ? 'reply' : 'replies'} waiting`)
   return Box({ gap: 1, children: [
     Text({ dimColor: true, children: parts.join(' · ') }),
-    Button({ key: 'review', label: 'review', hotkey: 'p', plain: true, onPress: () => openPane($) }),
+    ...(view.threads.length > 0 ? [Button({ key: 'review', label: 'review', hotkey: 'p', plain: true, onPress: () => openPane($) })] : []),
   ] })
 }
 
@@ -380,61 +382,93 @@ async function deferAction($) {
   await act($, 'Deferred to todo', (t) => { t.status = 'deferred'; t.by = 'user'; return discardUnsent(t) })
 }
 
+// Selects a thread from its row; an open reply input closes, its draft stays.
+async function selectAction($, id) {
+  await setView($, (v) => v.pane === null ? v : { ...v, pane: { ...v.pane, selected: id, replyFor: null } })
+}
+
+const SECTIONS = [
+  ['needs', 'NEEDS YOU'],
+  ['waiting', 'WAITING TO SEND'],
+  ['sent', 'WAITING ON CLAUDE'],
+]
+
 async function renderPane($, e, next) {
   const view = await getView($)
   const pane = view.pane
   if (pane === null || view.threads.length === 0) return next(e)
   const { Box, Text, Button, Input } = $.ui.resolve(e)
+  const terminal = e.surface === 'terminal'
   const focused = e.props?.isFocused === true
+  const columns = e.props?.bodyColumns
   const now = Date.now()
+  const drafts = pane.drafts ?? {}
   const threads = order(view.threads)
   const current = threads.find((t) => t.id === pane.selected) ?? threads[0]
+  const grouped = store.sections(threads)
 
-  const rows = threads.map((t) => {
-    const isCursor = t.id === current.id
-    const mark = isCursor ? (focused ? '▶' : '▷') : ' '
-    return Box({ gap: 1, children: [
-      Text({ bold: isCursor, inverse: isCursor && focused, dimColor: !isCursor && store.isStale(t, now), wrap: 'truncate', children: `${mark} #${t.id} ${t.text}` }),
-      Text({ color: t.kind === 'q' ? 'cyan' : 'magenta', children: t.kind === 'q' ? '?' : '§' }),
-      Text({ dimColor: true, children: store.age(t, now) }),
+  const row = (t) => {
+    const isCurrent = t.id === current.id
+    const age = store.age(t, now)
+    const shown = isCurrent || typeof columns !== 'number' ? t.text : store.clip(oneLine(t.text), Math.max(8, columns - age.length - 5))
+    const button = Button({ key: `row-${t.id}`, label: `#${t.id} ${oneLine(t.text)}`, plain: true, onPress: () => selectAction($, t.id), children: [
+      Text({ color: t.kind === 'q' ? 'cyan' : 'magenta', children: `${t.kind === 'q' ? 'Q' : 'T'} ` }),
+      Text({ weight: isCurrent ? 'semibold' : 'regular', dimColor: !isCurrent && store.isStale(t, now), wrap: isCurrent ? 'wrap' : 'truncate', children: `${shown} ` }),
+      Text({ dimColor: true, children: age }),
     ] })
-  })
-  const list = Box({ flexDirection: 'column', borderStyle: 'single', paddingX: 1, ...(focused ? { borderColor: 'cyan' } : { borderDimColor: true }), children: [
-    Box({ gap: 2, children: [
-      Text({ bold: true, children: `Geparkt · ${threads.length} open · ${pane.resolved} resolved` }),
-      focused ? Text({ color: 'green', children: '● keys active' }) : Text({ dimColor: true, children: '○ not focused' }),
-    ] }),
-    ...rows,
-  ] })
-
-  const reply = current.reply
-  const card = Box({ flexDirection: 'column', borderStyle: 'round', paddingX: 1, ...(focused ? {} : { borderDimColor: true }), children: [
-    Text({ bold: true, wrap: 'wrap', children: current.text }),
-    Text({ dimColor: true, children: `${store.KINDS[current.kind]} · parked ${store.age(current, now)} ago${store.isStale(current, now) ? ' · stale' : ''}` }),
-    reply ? Text({ wrap: 'wrap', children: `Reply (${store.stage(current)}): ${reply.text}` }) : Text({ dimColor: true, children: 'No reply. r adds one.' }),
-  ] })
-
-  // While the input is open the hotkeys are off, so typing j or k reaches the input.
-  const typing = pane.replyFor === current.id
-  const key = (name, label, hotkey, onPress) => Button({ key: name, label, ...(typing ? {} : { hotkey }), plain: true, ...(focused ? {} : { dimColor: true }), onPress })
-  const controls = []
-  if (typing) {
-    const id = current.id
-    controls.push(Input({ key: 'reply-input', label: 'Reply', placeholder: 'empty cancels', value: pane.drafts[String(id)] ?? '', submitLabel: 'save', autoFocus: true, onInput: (value) => draftReply($, id, value), onSubmit: (value) => saveReply($, id, value) }))
+    if (!t.reply || store.stage(t) !== 'waiting') return button
+    return Box({ flexDirection: 'column', children: [button, Text({ dimColor: true, wrap: 'wrap', children: `> ${t.reply.text}` })] })
   }
-  controls.push(Box({ columnGap: 2, flexWrap: 'wrap', children: [
-    key('down', 'down', 'j', () => move($, 1)),
-    key('up', 'up', 'k', () => move($, -1)),
-    key('back', 'back to it', 'b', () => backAction($)),
-    key('resolve', 'resolve', 'd', () => resolveAction($)),
-    key('drop', 'drop', 'x', () => dropAction($)),
-    typing ? key('save', 'save', 's', () => saveDraft($)) : key('reply', 'reply', 'r', () => replyAction($)),
-    key('defer', pane.deferFor === current.id ? 'defer: press f again' : 'defer to todo', 'f', () => deferAction($)),
-    key('close', 'close', 'q', () => $.ui.close({ id: PANE })),
+  const sections = SECTIONS.filter(([name]) => grouped[name].length > 0).map(([name, title]) => Box({ key: `section-${name}`, flexDirection: 'column', gap: 'xs', children: [
+    Text({ dimColor: true, children: `${title} · ${grouped[name].length}` }),
+    Box({ flexDirection: 'column', gap: 'sm', children: grouped[name].map(row) }),
   ] }))
-  const help = typing ? 'Enter saves the reply, empty Enter cancels, Esc returns to the prompt.'
-    : focused ? 'b puts the thread in the prompt box. Esc returns to the prompt.' : 'ctrl+x tab to focus · keys go to the prompt'
-  return Box({ flexDirection: 'column', gap: 1, children: [list, card, Box({ flexDirection: 'column', children: controls }), Text({ dimColor: true, wrap: 'wrap', children: help })] })
+
+  const id = current.id
+  const input = (autoFocus) => Input({ key: 'reply-input', label: 'Reply', placeholder: 'empty cancels', value: drafts[String(id)] ?? '', rows: 3, submitLabel: 'save', ...(autoFocus ? { autoFocus: true } : {}), onInput: (value) => draftReply($, id, value), onSubmit: (value) => saveReply($, id, value) })
+  // Hotkeys exist only in the terminal; the Desktop app draws each Button by its label.
+  const action = (name, label, hotkey, onPress, extra = {}) => Button({ key: name, label, ...(terminal ? { hotkey } : {}), ...(terminal ? { plain: true } : {}), ...(terminal && !focused ? { dimColor: true } : {}), ...extra, onPress })
+  const confirming = pane.deferFor === id
+  const controls = []
+  if (terminal && pane.replyFor === id) {
+    // While the input is open nothing else is drawn, so typing j or k reaches the input.
+    controls.push(input(true))
+  } else if (terminal) {
+    controls.push(Box({ columnGap: 'md', flexWrap: 'wrap', children: [
+      action('reply', 'reply', 'r', () => replyAction($)),
+      action('resolve', 'resolve', 'd', () => resolveAction($)),
+      action('back', 'back', 'b', () => backAction($)),
+      action('drop', 'drop', 'x', () => dropAction($)),
+      action('defer', confirming ? 'defer: press f again' : 'defer', 'f', () => deferAction($)),
+      action('close', 'close', 'q', () => $.ui.close({ id: PANE })),
+      action('down', 'down', 'j', () => move($, 1)),
+      action('up', 'up', 'k', () => move($, -1)),
+    ] }))
+    controls.push(Text({ dimColor: true, wrap: 'wrap', children: 'r replies · b puts it in the prompt box · Esc returns to the prompt' }))
+  } else {
+    controls.push(input(false))
+    controls.push(Box({ columnGap: 'md', flexWrap: 'wrap', children: [
+      action('save', 'save', 's', () => saveDraft($), { variant: 'primary' }),
+      action('resolve', 'resolve', 'd', () => resolveAction($)),
+      action('back', 'back', 'b', () => backAction($)),
+      action('drop', 'drop', 'x', () => dropAction($)),
+      action('defer', confirming ? 'defer again to confirm' : 'defer', 'f', () => deferAction($)),
+      action('close', 'close', 'q', () => $.ui.close({ id: PANE }), { role: 'dismiss' }),
+    ] }))
+  }
+
+  const detail = Box({ flexDirection: 'column', paddingX: 'sm', children: [
+    Text({ weight: 'semibold', wrap: 'wrap', children: current.text }),
+    Text({ dimColor: true, children: `${store.KINDS[current.kind]} · parked ${store.age(current, now)} ago` }),
+    ...(current.notes ?? []).map((note) => Text({ dimColor: true, wrap: 'wrap', children: `· ${note.text}` })),
+    ...controls,
+  ] })
+  const resolved = pane.resolved > 0 ? ` · ${pane.resolved} resolved` : ''
+  return Box({ flexDirection: 'column', gap: 'md', children: [
+    Text({ weight: 'semibold', children: `Geparkt · ${threads.length} open${resolved}` }),
+    ...sections,
+    detail,
+  ] })
 }
 
 async function closePane($, e, next) {

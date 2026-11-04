@@ -27,7 +27,9 @@ Keeps track of the questions Claude asks and the topics it parks. Claude asks th
 | `/geparkt` | Opens the review pane; without a pane surface (headless, SDK) it prints the open threads. |
 | `/geparkt list` | Prints the open threads. |
 
-In the pane: `j`/`k` move, `b` puts the thread back in the prompt box as a draft (`Back to #3: …`) and closes the pane, `d` resolves, `x` drops, `n` adds a note, `f` twice defers the thread to the [todo](../todo) plugin as `<text> #question`, `q` closes.
+The pane groups open threads in three sections, shown only when they hold a thread: `NEEDS YOU` (no reply yet), `WAITING TO SEND` (a reply saved, shown under its row as `> <reply>`) and `WAITING ON CLAUDE` (the reply was sent with a prompt). Each row is a button that selects its thread, so the Desktop app needs no hotkeys; there the reply input is always drawn, with `save`, `resolve`, `back`, `drop`, `defer` and `close` as buttons.
+
+In the terminal pane: `j`/`k` move, `r` replies (the reply goes to Claude with your next prompt; the thread stays open until Claude closes it), `b` puts the thread back in the prompt box as a draft (`Back to #3: …`) and closes the pane, `d` resolves, `x` drops, `f` twice defers the thread to the [todo](../todo) plugin as `<text> #question`, `q` closes. While the reply input is open the other keys are off, so typing `j` or `k` reaches the input; Enter saves, an empty Enter cancels.
 
 If another skill or command already uses the name `geparkt`, use `/geparkt:track`.
 
@@ -42,7 +44,7 @@ Upgrading from 0.1: the skill is now `track`, so the namespaced command is `/gep
 - A file that does not parse is refused and left as it is, never replaced, so ids are not reused; delete it to start over.
 - Changes from the pane and from Claude's calls are written one at a time, so neither overwrites the other. A call that waits for your approval holds the others back until it is answered.
 - The fallback hook replaces the file in one step; the mod writes it in place, as the mods API has no rename, so a crash mid-write can leave a file that is then refused.
-- Each thread holds its id (never reused), kind, text, status (`open`, `resolved`, `dropped`, `deferred`), the decision, who closed it (`claude` or `user`), notes and two timestamps.
+- Each thread holds its id (never reused), kind, text, status (`open`, `resolved`, `dropped`, `deferred`), the decision, who closed it (`claude` or `user`), notes (older versions only), an optional `reply` (`text`, `at`, `sentAt`; `sentAt` is null until a prompt carried it) and two timestamps.
 
 ## Without the mod
 
