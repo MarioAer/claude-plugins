@@ -615,7 +615,93 @@ test('the waiting section names its heading and shows each reply under its row',
   const reply = find(byKey(tree, 'section-waiting'), (n) => n.type === 'Text' && typeof n.children === 'string' && n.children.startsWith('> '))
   assert.equal(reply.children, '> my answer')
   assert.equal(reply.dimColor, true)
-  assert.equal(find(byKey(tree, 'section-sent'), (n) => typeof n.children === 'string' && n.children.startsWith('> ')), null)
+})
+
+test('the sent section shows each sent reply dim under its row', async () => {
+  const { render } = await withStages()
+  const tree = await render()
+  const reply = find(byKey(tree, 'section-sent'), (n) => n.type === 'Text' && typeof n.children === 'string' && n.children.startsWith('> '))
+  assert.equal(reply.children, '> old answer')
+  assert.equal(reply.dimColor, true)
+})
+
+test('rows with a reply sit in a keyed wrapper; the row button keeps its key', async () => {
+  const { render } = await withStages()
+  const tree = await render()
+  assert.equal(byKey(tree, 'row-box-2').type, 'Box')
+  assert.equal(byKey(tree, 'row-box-3').type, 'Box')
+  assert.equal(byKey(byKey(tree, 'row-box-2'), 'row-2').type, 'Button')
+  assert.equal(byKey(tree, 'row-box-1'), null)
+  assert.equal(byKey(tree, 'row-1').type, 'Button')
+})
+
+test('the reply input starts from the saved unsent reply', async () => {
+  const { $, fire, render } = await paneOn('+q A?')
+  await press(await render(), 'reply')
+  await find(await render(), (n) => n.type === 'Input').onSubmit('yes')
+  const desktop = async () => byKey((await fire($, 'ui.render', desktopSite)).out, 'reply-input')
+  assert.equal((await desktop()).value, 'yes')
+  await press(await render(), 'reply')
+  assert.equal(byKey(await render(), 'reply-input').value, 'yes')
+  // A draft in progress wins over the saved reply, an emptied draft stays empty.
+  await (await desktop()).onInput('yes please')
+  assert.equal((await desktop()).value, 'yes please')
+  await (await desktop()).onInput('')
+  assert.equal((await desktop()).value, '')
+})
+
+test('the reply input of a sent reply starts empty', async () => {
+  const { $, fire } = await withStages()
+  await press((await fire($, 'ui.render', desktopSite)).out, 'row-3')
+  assert.equal(byKey((await fire($, 'ui.render', desktopSite)).out, 'reply-input').value, '')
+})
+
+test('a pane saved without drafts takes input, save and submit', async () => {
+  const { dir, $, fire, view } = await paneOn('+q A? | +q B?')
+  const strip = async () => {
+    const v = await view()
+    const { drafts, ...pane } = v.pane
+    await $.state.set({ plugin: 'geparkt', key: 'view' }, { ...v, pane })
+  }
+  const desktop = async () => (await fire($, 'ui.render', desktopSite)).out
+  await strip()
+  await byKey(await desktop(), 'reply-input').onInput('via save')
+  await press(await desktop(), 'save')
+  assert.equal((await fileOf(dir)).threads[0].reply.text, 'via save')
+  assert.equal($.log.toasts.at(-1), 'Reply saved: via save')
+  await press(await desktop(), 'row-2')
+  await strip()
+  await byKey(await desktop(), 'reply-input').onSubmit('via submit')
+  assert.equal((await fileOf(dir)).threads[1].reply.text, 'via submit')
+  assert.equal($.log.toasts.at(-1), 'Reply saved: via submit')
+  await strip()
+  await press(await desktop(), 'row-2')
+  await strip()
+  await byKey(await desktop(), 'reply-input').onSubmit('')
+  assert.equal((await view()).pane.replyFor, null)
+})
+
+test('a pane saved with index and no selected keeps the first thread selected', async () => {
+  const { $, fire, view } = await paneOn('+q A? | +q B? | +q C?')
+  const v = await view()
+  const { selected, ...pane } = v.pane
+  await $.state.set({ plugin: 'geparkt', key: 'view' }, { ...v, pane: { ...pane, index: 0 } })
+  await fire($, 'tool.call', skill('+t D'))
+  assert.equal((await view()).pane.selected, 1)
+})
+
+test('the band lays out with a named gap', async () => {
+  const { $, fire } = await paneOn('+q A?')
+  assert.equal((await fire($, 'ui.render', band)).out.gap, 'sm')
+})
+
+test('the detail does not repeat the selected thread text', async () => {
+  const { $, fire } = await paneOn('+q A very distinctive question?')
+  for (const site of [paneSite, desktopSite]) {
+    const tree = (await fire($, 'ui.render', site)).out
+    const hits = all(tree, (n) => n.type === 'Text' && typeof n.children === 'string' && n.children.includes('very distinctive'))
+    assert.equal(hits.length, 1)
+  }
 })
 
 test('the header counts open and resolved threads', async () => {

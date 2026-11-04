@@ -62,7 +62,7 @@ async function publish($, root, sessionId, data) {
     const after = order(threads).map((t) => t.id)
     const pane = v.pane && {
       ...v.pane,
-      selected: reselect(v.pane.selected, order(v.threads).map((t) => t.id), after),
+      selected: reselect(v.pane.selected ?? null, order(v.threads).map((t) => t.id), after),
       replyFor: after.includes(v.pane.replyFor) ? v.pane.replyFor : null,
     }
     return { ...v, root, sessionId, threads, unsent, pane }
@@ -238,7 +238,7 @@ async function renderBand($, e, next) {
   if (questions > 0 && questions < view.threads.length) parts.push(`${questions} questions`)
   if (stale > 0) parts.push(`${stale} stale`)
   if (unsent > 0) parts.push(`${unsent} ${unsent === 1 ? 'reply' : 'replies'} waiting`)
-  return Box({ gap: 1, children: [
+  return Box({ gap: 'sm', children: [
     Text({ dimColor: true, children: parts.join(' · ') }),
     ...(view.threads.length > 0 ? [Button({ key: 'review', label: 'review', hotkey: 'p', plain: true, onPress: () => openPane($) })] : []),
   ] })
@@ -306,7 +306,7 @@ const resolveAction = ($) => act($, 'Resolved', (t) => { t.status = 'resolved'; 
 
 const dropAction = ($) => act($, 'Dropped', (t) => { t.status = 'dropped'; t.by = 'user'; return discardUnsent(t) })
 
-const without = (drafts, id) => Object.fromEntries(Object.entries(drafts).filter(([key]) => key !== String(id)))
+const without = (drafts, id) => Object.fromEntries(Object.entries(drafts ?? {}).filter(([key]) => key !== String(id)))
 
 // Opens the reply input on the selected thread; its draft, if any, is shown in it.
 async function replyAction($) {
@@ -314,7 +314,7 @@ async function replyAction($) {
 }
 
 async function draftReply($, id, value) {
-  await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, drafts: { ...v.pane.drafts, [String(id)]: value } } }))
+  await setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, drafts: { ...(v.pane.drafts ?? {}), [String(id)]: value } } }))
 }
 
 // Saves the reply on the thread it was typed for. An empty reply only closes the input. A reply
@@ -333,7 +333,7 @@ async function saveReply($, id, value) {
 async function saveDraft($) {
   const { pane } = await getView($)
   const id = pane?.replyFor ?? pane?.selected ?? null
-  if (id !== null) await saveReply($, id, pane.drafts[String(id)] ?? '')
+  if (id !== null) await saveReply($, id, pane.drafts?.[String(id)] ?? '')
 }
 
 // Puts the thread back in the prompt box as a draft; no turn starts until the person sends it.
@@ -416,8 +416,8 @@ async function renderPane($, e, next) {
       Text({ weight: isCurrent ? 'semibold' : 'regular', dimColor: !isCurrent && store.isStale(t, now), wrap: isCurrent ? 'wrap' : 'truncate', children: `${shown} ` }),
       Text({ dimColor: true, children: age }),
     ] })
-    if (!t.reply || store.stage(t) !== 'waiting') return button
-    return Box({ flexDirection: 'column', children: [button, Text({ dimColor: true, wrap: 'wrap', children: `> ${t.reply.text}` })] })
+    if (!t.reply) return button
+    return Box({ key: `row-box-${t.id}`, flexDirection: 'column', children: [button, Text({ dimColor: true, wrap: 'wrap', children: `> ${t.reply.text}` })] })
   }
   const sections = SECTIONS.filter(([name]) => grouped[name].length > 0).map(([name, title]) => Box({ key: `section-${name}`, flexDirection: 'column', gap: 'xs', children: [
     Text({ dimColor: true, children: `${title} · ${grouped[name].length}` }),
@@ -425,7 +425,8 @@ async function renderPane($, e, next) {
   ] }))
 
   const id = current.id
-  const input = (autoFocus) => Input({ key: 'reply-input', label: 'Reply', placeholder: 'empty cancels', value: drafts[String(id)] ?? '', rows: 3, submitLabel: 'save', ...(autoFocus ? { autoFocus: true } : {}), onInput: (value) => draftReply($, id, value), onSubmit: (value) => saveReply($, id, value) })
+  const saved = current.reply && current.reply.sentAt === null ? current.reply.text : ''
+  const input = (autoFocus) => Input({ key: 'reply-input', label: 'Reply', placeholder: 'empty cancels', value: drafts[String(id)] ?? saved, rows: 3, submitLabel: 'save', ...(autoFocus ? { autoFocus: true } : {}), onInput: (value) => draftReply($, id, value), onSubmit: (value) => saveReply($, id, value) })
   // Hotkeys exist only in the terminal; the Desktop app draws each Button by its label.
   const action = (name, label, hotkey, onPress, extra = {}) => Button({ key: name, label, ...(terminal ? { hotkey } : {}), ...(terminal ? { plain: true } : {}), ...(terminal && !focused ? { dimColor: true } : {}), ...extra, onPress })
   const confirming = pane.deferFor === id
@@ -458,7 +459,6 @@ async function renderPane($, e, next) {
   }
 
   const detail = Box({ flexDirection: 'column', paddingX: 'sm', children: [
-    Text({ weight: 'semibold', wrap: 'wrap', children: current.text }),
     Text({ dimColor: true, children: `${store.KINDS[current.kind]} · parked ${store.age(current, now)} ago` }),
     ...(current.notes ?? []).map((note) => Text({ dimColor: true, wrap: 'wrap', children: `· ${note.text}` })),
     ...controls,
