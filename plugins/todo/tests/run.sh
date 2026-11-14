@@ -86,13 +86,57 @@ rc=$?
 if [ "$rc" -eq 0 ] &&
   grep -q '"hookEventName": *"SessionStart"' <<<"$out" &&
   grep -q 'todo:capture' <<<"$out" &&
-  python3 -c 'import json,sys; json.loads(sys.argv[1])' "$out" 2>/dev/null; then
+  jq -e . >/dev/null 2>&1 <<<"$out"; then
   echo "PASS session-start emits valid JSON context naming the skill"
   passed=$((passed + 1))
 else
   echo "FAIL session-start: rc=$rc output=$out"
   failed=$((failed + 1))
 fi
+
+# Reminder after compact, clear and resume: the open items of the session's view, read-only.
+context_of() { jq -r '.hookSpecificOutput.additionalContext' <<<"$1"; }
+session_start() { printf '{"hook_event_name":"SessionStart","source":"%s","cwd":"%s"}' "$1" "$2" | bash "$SESSION_HOOK" 2>/dev/null; }
+check_reminder() {
+  local label=$1 got=$2 want=$3
+  if [ "$got" = "$want" ]; then
+    echo "PASS $label"
+    passed=$((passed + 1))
+  else
+    echo "FAIL $label: got [$got] want [$want]"
+    failed=$((failed + 1))
+  fi
+}
+RREPO="$WORK/remind"
+mkdir -p "$RREPO"
+git -C "$RREPO" init -q -b main
+git -C "$RREPO" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m init
+git -C "$RREPO" worktree add -q -b a "$RREPO/.claude/worktrees/a"
+git -C "$RREPO" worktree add -q -b b "$RREPO/.claude/worktrees/b"
+mkdir -p "$RREPO/.todo"
+printf '# Todo\n\n- [ ] repo one (2026-01-01, branch: main, tags: x)\n- [ ] gone one (2026-01-01, worktree: dead)\n- [ ] mine "quoted" (2026-01-01, branch: a, worktree: a)\n- [ ] theirs (2026-01-01, worktree: b)\n- [x] closed (2026-01-01, worktree: a)\n' >"$RREPO/.todo/todo.md"
+before=$(cat "$RREPO/.todo/todo.md")
+out=$(session_start startup "$RREPO/.claude/worktrees/a")
+check_reminder "startup adds no reminder" "$(context_of "$out" | grep -c 'Open todo items')" 0
+out=$(session_start compact "$RREPO/.claude/worktrees/a")
+check_reminder "compact in a worktree lists own items, then repo-wide, without removed or other worktrees" \
+  "$(context_of "$out" | grep -o 'Open todo items.*')" 'Open todo items (2): 1. mine "quoted" 2. repo one'
+check_reminder "reminder output is valid JSON" "$(jq -e . >/dev/null 2>&1 <<<"$out" && echo ok)" ok
+out=$(session_start resume "$RREPO")
+check_reminder "resume in the main checkout lists repo-wide first, then worktrees" \
+  "$(context_of "$out" | grep -o 'Open todo items.*')" 'Open todo items (3): 1. repo one 2. mine "quoted" 3. theirs'
+check_reminder "the reminder never writes the file" "$(cat "$RREPO/.todo/todo.md")" "$before"
+{
+  printf '# Todo\n\n'
+  for n in 1 2 3 4 5 6 7 8 9; do printf -- '- [ ] item %s (2026-01-01)\n' "$n"; done
+} >"$RREPO/.todo/todo.md"
+out=$(session_start clear "$RREPO")
+check_reminder "nine items list eight" "$(context_of "$out" | grep -o 'Open todo items.*')" \
+  'Open todo items (9): 1. item 1 2. item 2 3. item 3 4. item 4 5. item 5 6. item 6 7. item 7 8. item 8'
+out=$(session_start compact "$WORK/fresh")
+check_reminder "no todo file adds no reminder" "$(context_of "$out" | grep -c 'Open todo items')" 0
+# shellcheck disable=SC2016  # literal text the rule must contain
+check_reminder "the rule tells Claude to close parked questions with done" "$(context_of "$out" | grep -c '#question.*done <item text>')" 1
 
 # Skill context budget: SKILL.md is injected on every invocation, including Claude's own adds,
 # so it holds only the decision logic; the fallback and review procedures live in files read on demand.
