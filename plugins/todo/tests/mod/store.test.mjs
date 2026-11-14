@@ -45,12 +45,12 @@ function gitInit(dir) { execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'mai
 
 test('locate: git root and unborn branch from a subdirectory', async () => {
   const dir = await scratch(); gitInit(dir); await mkdir(join(dir, 'src/sub'), { recursive: true })
-  assert.deepEqual(await locate(nodeIo(), join(dir, 'src/sub')), { root: dir, branch: 'main', inRepo: true })
+  assert.deepEqual(await locate(nodeIo(), join(dir, 'src/sub')), { root: dir, branch: 'main', inRepo: true, worktree: null })
 })
 
 test('locate: non-git directory is its own root without a branch', async () => {
   const dir = await scratch()
-  assert.deepEqual(await locate(nodeIo(), dir), { root: dir, branch: null, inRepo: false })
+  assert.deepEqual(await locate(nodeIo(), dir), { root: dir, branch: null, inRepo: false, worktree: null })
 })
 
 test('locate: detached HEAD has no branch', async () => {
@@ -312,4 +312,56 @@ test('markUndone reopens a done line once; listWithOrder carries the notes', asy
   assert.equal(await markUndone(io(), dir, 'a (2026-01-01)'), false)
   const loaded = await listWithOrder(io(), dir)
   assert.deepEqual(loaded.notes, { 'a (2026-01-01)': [{ date: '2026-01-02', text: 'n' }] })
+})
+
+// Worktree scope (0.8): one list per repository in the main checkout.
+import { itemWorktree, scopeOf } from '../../hooks/store.js'
+const G = ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false']
+function repoWithWorktree(dir, name = 'wt') {
+  gitInit(dir)
+  execFileSync('git', ['-C', dir, ...G, 'commit', '-q', '--allow-empty', '-m', 'init'])
+  const path = join(dir, '.claude/worktrees', name)
+  execFileSync('git', ['-C', dir, 'worktree', 'add', '-q', '-b', name, path])
+  return path
+}
+
+test('locate in a linked worktree returns the main checkout as root and the worktree basename', async () => {
+  const dir = await scratch(); const wt = repoWithWorktree(dir)
+  assert.deepEqual(await locate(nodeIo(), wt), { root: dir, branch: 'wt', inRepo: true, worktree: 'wt' })
+})
+
+test('locate in the main checkout returns worktree null', async () => {
+  const dir = await scratch(); repoWithWorktree(dir)
+  assert.equal((await locate(nodeIo(), dir)).worktree, null)
+})
+
+test('scopeOf applies #repo, claude and #question rules', () => {
+  assert.deepEqual(scopeOf({ worktree: 'wt', byClaude: false, tags: ['x'] }), { worktree: 'wt', tags: ['x'] })
+  assert.deepEqual(scopeOf({ worktree: 'wt', byClaude: false, tags: ['repo', 'x'] }), { worktree: null, tags: ['x'] })
+  assert.deepEqual(scopeOf({ worktree: 'wt', byClaude: true, tags: [] }), { worktree: null, tags: [] })
+  assert.deepEqual(scopeOf({ worktree: 'wt', byClaude: true, tags: ['question'] }), { worktree: 'wt', tags: ['question'] })
+  assert.deepEqual(scopeOf({ worktree: null, byClaude: false, tags: ['repo'] }), { worktree: null, tags: [] })
+})
+
+test('META keeps ", worktree: x)" inside the text as text', () => {
+  assert.equal(itemWorktree('a, worktree: x) b (2026-01-01)'), null)
+  assert.equal(itemWorktree('a (2026-01-01, branch: b, worktree: wt, by: claude, tags: q)'), 'wt')
+})
+
+test('concurrent adds from two worktrees both land', async () => {
+  const dir = await scratch()
+  await Promise.all([
+    add(io(), { root: dir, branch: 'a', worktree: 'a', text: 'from a', byClaude: false }),
+    add(io(), { root: dir, branch: 'b', worktree: 'b', text: 'from b', byClaude: false }),
+  ])
+  const content = await read(dir)
+  assert.match(content, /- \[ \] from a \(2026-01-01, branch: a, worktree: a\)\n/)
+  assert.match(content, /- \[ \] from b \(2026-01-01, branch: b, worktree: b\)\n/)
+})
+
+test('promoting a duplicate keeps $ patterns in the item text literally', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.todo'))
+  await writeFile(join(dir, '.todo/todo.md'), "# Todo\n\n- [ ] cost $& and $' (2026-01-01, branch: a, worktree: a)\n")
+  await add(io(), { root: dir, branch: null, worktree: null, text: "cost $& and $'", byClaude: false })
+  assert.equal(await read(dir), "# Todo\n\n- [ ] cost $& and $' (2026-01-01, branch: a)\n")
 })

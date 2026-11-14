@@ -28,9 +28,9 @@ for (const c of cases) {
     }
     const io = nodeIo({ today: TODAY })
     if (c.op === 'add' && c.expect.refused !== undefined) {
-      await assert.rejects(add(io, { root: dir, branch: c.branch, text: c.text, byClaude: c.byClaude }), (e) => e.message === c.expect.refused)
+      await assert.rejects(add(io, { root: dir, branch: c.branch, worktree: c.worktree ?? null, text: c.text, byClaude: c.byClaude }), (e) => e.message === c.expect.refused)
     } else if (c.op === 'add') {
-      assert.equal(await add(io, { root: dir, branch: c.branch, text: c.text, byClaude: c.byClaude }), fill(c.expect.marker))
+      assert.equal(await add(io, { root: dir, branch: c.branch, worktree: c.worktree ?? null, text: c.text, byClaude: c.byClaude }), fill(c.expect.marker))
     }
     if (c.op === 'list') assert.deepEqual(await list(io, dir, c.tag ?? null), c.expect.items)
     if (c.op === 'done') assert.equal(await markDone(io, dir, c.item), c.expect.ok)

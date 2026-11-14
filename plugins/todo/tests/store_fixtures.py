@@ -32,6 +32,8 @@ def folder_content(root):
 
 def run(case):
     """Returns None for a case Python does not implement, '' on success, else the problem."""
+    if "worktree" in case:
+        return None  # worktree scope exists only in the mod; this runner goes away with the hook
     with tempfile.TemporaryDirectory() as root:
         root = os.path.realpath(root)
         if case.get("files"):
