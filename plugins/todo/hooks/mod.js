@@ -446,7 +446,7 @@ async function listText($, cwd, tag = null) {
   const { root } = located
   if (store.rootRefused(located)) return { root, text: replyFor(INSIDE) }
   try {
-    const items = await store.list(io, root, tag)
+    const items = await store.list(io, root, { tag })
     return { root, items, text: items.length ? store.numbered(items) : 'Todo list is empty.' }
   } catch (error) {
     if (error instanceof store.Refused) return { root, text: `Todo failed: ${error.message}` }

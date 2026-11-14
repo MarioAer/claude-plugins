@@ -184,10 +184,78 @@ export async function checkLinks(io, folder) {
   }
 }
 
-export async function list(io, root, tag = null) {
+// Basenames of the worktrees git lists, prunable ones (directory gone) left out; null when git fails,
+// so a failure never closes anything. The main checkout is listed too, which is harmless.
+export async function liveWorktrees(io, root) {
+  let result
+  try {
+    result = await io.run(['git', '-C', root, 'worktree', 'list', '--porcelain'], { cwd: root, timeoutMs: 2000 })
+  } catch {
+    return null
+  }
+  if (result.exitCode !== 0) return null
+  const live = new Set()
+  for (const entry of result.stdout.split('\n\n')) {
+    const lines = entry.split('\n')
+    const path = lines.find((line) => line.startsWith('worktree '))
+    if (path === undefined || lines.some((line) => line === 'prunable' || line.startsWith('prunable '))) continue
+    live.add(path.slice(path.lastIndexOf('/') + 1))
+  }
+  return live
+}
+
+const removed = (item, live) => {
+  const owner = itemWorktree(item)
+  return owner !== null && !live.has(owner)
+}
+
+// Closes, in one write, every open item whose worktree is not in live, with a `worktree removed` note
+// after its existing notes. Resolves to the number closed.
+export async function closeRemoved(io, root, live) {
+  let closed = 0
+  await edit(io, root, (lines) => {
+    const out = []
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      if (!line.startsWith('- [ ] ') || !removed(line.slice(6), live)) { out.push(line); continue }
+      out.push(`- [x] ${line.slice(6)}`)
+      while (i + 1 < lines.length && lines[i + 1].startsWith('  - ')) out.push(lines[++i])
+      out.push(`  - ${io.today()}: worktree removed`)
+      closed++
+    }
+    return closed > 0 ? out : null
+  })
+  return closed
+}
+
+// The items one session sees. In a worktree: its own items, then repo-wide ones; other worktrees'
+// items are left out. In the main checkout (here null): repo-wide first, then each worktree's items
+// in order of first appearance.
+export function viewItems(items, here) {
+  if (here !== null) {
+    return [...items.filter((item) => itemWorktree(item) === here), ...items.filter((item) => itemWorktree(item) === null)]
+  }
+  const scopes = [null]
+  for (const item of items) if (!scopes.includes(itemWorktree(item))) scopes.push(itemWorktree(item))
+  return scopes.flatMap((scope) => items.filter((item) => itemWorktree(item) === scope))
+}
+
+// The file's content after closing items of removed worktrees. The lock is taken only when an open
+// item names a worktree git no longer lists, so plain reads never write.
+async function freshContent(io, root) {
+  const path = `${root}/.todo/todo.md`
+  const content = (await io.read(path)) ?? ''
+  if (!openItems(content).some((item) => itemWorktree(item) !== null)) return content
+  const live = await liveWorktrees(io, root)
+  if (live === null || !openItems(content).some((item) => removed(item, live))) return content
+  await closeRemoved(io, root, live)
+  return (await io.read(path)) ?? ''
+}
+
+export async function list(io, root, { tag = null, here = null } = {}) {
   const folder = `${root}/.todo`
   await checkLinks(io, folder)
-  const items = openItems((await io.read(`${folder}/todo.md`)) ?? '')
+  const items = viewItems(openItems(await freshContent(io, root)), here)
   return tag === null ? items : items.filter((item) => itemTags(item).includes(tag))
 }
 
@@ -334,9 +402,9 @@ export async function setTags(io, root, item, tags) {
 }
 
 // The open items, the colour order and each item's notes from one read, for the pane.
-export async function listWithOrder(io, root) {
+export async function listWithOrder(io, root, here = null) {
   const folder = `${root}/.todo`
   await checkLinks(io, folder)
-  const content = (await io.read(`${folder}/todo.md`)) ?? ''
-  return { items: openItems(content), order: tagOrder(content), notes: itemNotes(content) }
+  const content = await freshContent(io, root)
+  return { items: viewItems(openItems(content), here), order: tagOrder(content), notes: itemNotes(content) }
 }

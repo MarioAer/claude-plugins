@@ -32,7 +32,7 @@ for (const c of cases) {
     } else if (c.op === 'add') {
       assert.equal(await add(io, { root: dir, branch: c.branch, worktree: c.worktree ?? null, text: c.text, byClaude: c.byClaude }), fill(c.expect.marker))
     }
-    if (c.op === 'list') assert.deepEqual(await list(io, dir, c.tag ?? null), c.expect.items)
+    if (c.op === 'list') assert.deepEqual(await list(io, dir, { tag: c.tag ?? null }), c.expect.items)
     if (c.op === 'done') assert.equal(await markDone(io, dir, c.item), c.expect.ok)
     if (c.op === 'note') assert.equal(await addNote(io, dir, c.item, c.note), c.expect.ok)
     const expected = Object.fromEntries(Object.entries(c.expect.files).map(([k, v]) => [k, fill(v)]))

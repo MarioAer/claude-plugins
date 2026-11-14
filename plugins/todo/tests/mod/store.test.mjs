@@ -317,11 +317,11 @@ test('markUndone reopens a done line once; listWithOrder carries the notes', asy
 // Worktree scope (0.8): one list per repository in the main checkout.
 import { itemWorktree, scopeOf } from '../../hooks/store.js'
 const G = ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false']
-function repoWithWorktree(dir, name = 'wt') {
+function repoWithWorktree(dir, name = 'wt', branch = name.replace(/ /g, '-')) {
   gitInit(dir)
   execFileSync('git', ['-C', dir, ...G, 'commit', '-q', '--allow-empty', '-m', 'init'])
   const path = join(dir, '.claude/worktrees', name)
-  execFileSync('git', ['-C', dir, 'worktree', 'add', '-q', '-b', name, path])
+  execFileSync('git', ['-C', dir, 'worktree', 'add', '-q', '-b', branch, path])
   return path
 }
 
@@ -364,4 +364,60 @@ test('promoting a duplicate keeps $ patterns in the item text literally', async 
   await writeFile(join(dir, '.todo/todo.md'), "# Todo\n\n- [ ] cost $& and $' (2026-01-01, branch: a, worktree: a)\n")
   await add(io(), { root: dir, branch: null, worktree: null, text: "cost $& and $'", byClaude: false })
   assert.equal(await read(dir), "# Todo\n\n- [ ] cost $& and $' (2026-01-01, branch: a)\n")
+})
+
+// Worktree cleanup and views.
+import { liveWorktrees, closeRemoved, viewItems } from '../../hooks/store.js'
+
+test('closeRemoved closes items of a removed worktree with a note', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.todo'))
+  await writeFile(join(dir, '.todo/todo.md'), '# Todo\n\n- [ ] gone (2026-01-01, branch: a, worktree: a)\n  - 2026-01-01: old note\n- [ ] kept (2026-01-01, branch: b, worktree: b)\n- [ ] repo (2026-01-01)\n')
+  assert.equal(await closeRemoved(io(), dir, new Set(['b'])), 1)
+  assert.equal(await read(dir), '# Todo\n\n- [x] gone (2026-01-01, branch: a, worktree: a)\n  - 2026-01-01: old note\n  - 2026-01-01: worktree removed\n- [ ] kept (2026-01-01, branch: b, worktree: b)\n- [ ] repo (2026-01-01)\n')
+})
+
+test('list closes items of a worktree git no longer lists', async () => {
+  const dir = await scratch(); repoWithWorktree(dir, 'live'); await mkdir(join(dir, '.todo'))
+  await writeFile(join(dir, '.todo/todo.md'), '# Todo\n\n- [ ] gone (2026-01-01, worktree: dead)\n- [ ] here (2026-01-01, worktree: live)\n')
+  assert.deepEqual(await list(io(), dir), ['here (2026-01-01, worktree: live)'])
+  assert.match(await read(dir), /- \[x\] gone \(2026-01-01, worktree: dead\)\n {2}- 2026-01-01: worktree removed\n/)
+})
+
+test('a failing git closes nothing', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.todo'))
+  const content = '# Todo\n\n- [ ] gone (2026-01-01, worktree: dead)\n'
+  await writeFile(join(dir, '.todo/todo.md'), content)
+  const failing = { ...io(), run: async (argv, init) => (argv.includes('worktree') ? { exitCode: 128, stdout: '', stderr: 'fatal' } : io().run(argv, init)) }
+  assert.equal(await liveWorktrees(failing, dir), null)
+  assert.deepEqual(await list(failing, dir), ['gone (2026-01-01, worktree: dead)'])
+  assert.equal(await read(dir), content)
+})
+
+test('liveWorktrees reads a path with spaces', async () => {
+  const dir = await scratch(); repoWithWorktree(dir, 'with space')
+  assert.ok((await liveWorktrees(nodeIo(), dir)).has('with space'))
+})
+
+test('a prunable worktree counts as removed', async () => {
+  const dir = await scratch(); const wt = repoWithWorktree(dir, 'pruned')
+  execFileSync('rm', ['-rf', wt])
+  assert.equal((await liveWorktrees(nodeIo(), dir)).has('pruned'), false)
+})
+
+test('viewItems orders own worktree first and hides others', () => {
+  const items = ['r1 (2026-01-01)', 'a1 (2026-01-01, worktree: a)', 'b1 (2026-01-01, worktree: b)', 'a2 (2026-01-01, worktree: a)']
+  assert.deepEqual(viewItems(items, 'a'), ['a1 (2026-01-01, worktree: a)', 'a2 (2026-01-01, worktree: a)', 'r1 (2026-01-01)'])
+})
+
+test('viewItems in the main checkout groups repo-wide first', () => {
+  const items = ['b1 (2026-01-01, worktree: b)', 'r1 (2026-01-01)', 'a1 (2026-01-01, worktree: a)', 'b2 (2026-01-01, worktree: b)']
+  assert.deepEqual(viewItems(items, null), ['r1 (2026-01-01)', 'b1 (2026-01-01, worktree: b)', 'b2 (2026-01-01, worktree: b)', 'a1 (2026-01-01, worktree: a)'])
+})
+
+test('list filters by tag within the view, and listWithOrder applies the view', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.todo'))
+  await writeFile(join(dir, '.todo/todo.md'), '# Todo\n\n- [ ] r (2026-01-01, tags: t)\n- [ ] a (2026-01-01, worktree: a, tags: t)\n- [ ] b (2026-01-01, worktree: b, tags: t)\n')
+  const offline = { ...io(), run: async () => ({ exitCode: 128, stdout: '', stderr: '' }) }
+  assert.deepEqual(await list(offline, dir, { tag: 't', here: 'a' }), ['a (2026-01-01, worktree: a, tags: t)', 'r (2026-01-01, tags: t)'])
+  assert.deepEqual((await listWithOrder(offline, dir, 'b')).items, ['b (2026-01-01, worktree: b, tags: t)', 'r (2026-01-01, tags: t)'])
 })
