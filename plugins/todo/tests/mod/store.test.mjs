@@ -421,3 +421,46 @@ test('list filters by tag within the view, and listWithOrder applies the view', 
   assert.deepEqual(await list(offline, dir, { tag: 't', here: 'a' }), ['a (2026-01-01, worktree: a, tags: t)', 'r (2026-01-01, tags: t)'])
   assert.deepEqual((await listWithOrder(offline, dir, 'b')).items, ['b (2026-01-01, worktree: b, tags: t)', 'r (2026-01-01, tags: t)'])
 })
+
+// done mode.
+import { closeByText, doneText } from '../../hooks/store.js'
+
+test('modeOf selects done only with text after it', () => {
+  assert.equal(modeOf('done fix login'), 'done')
+  assert.equal(modeOf('Done  fix login'), 'done')
+  assert.equal(modeOf('done'), 'add')
+  assert.equal(doneText('done   Fix Login'), 'Fix Login')
+})
+
+const DONE_FILE = '# Todo\n\n- [ ] Fix login (2026-01-01, branch: a, worktree: a)\n  - 2026-01-01: n\n- [ ] other (2026-01-01, worktree: b)\n- [ ] repo item (2026-01-01, tags: question)\n'
+const offlineIo = () => ({ ...io(), run: async (argv, init) => (argv[0] === 'git' ? { exitCode: 128, stdout: '', stderr: '' } : io().run(argv, init)) })
+
+test('closeByText by claude marks the item done with a note', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.todo')); await writeFile(join(dir, '.todo/todo.md'), DONE_FILE)
+  assert.equal(await closeByText(offlineIo(), { root: dir, here: 'a', text: 'fix LOGIN', byClaude: true }), `TODO_DONE: Fix login\n${DATA_NOTE}`)
+  assert.equal(await read(dir), '# Todo\n\n- [x] Fix login (2026-01-01, branch: a, worktree: a)\n  - 2026-01-01: n\n  - 2026-01-01: done by claude\n- [ ] other (2026-01-01, worktree: b)\n- [ ] repo item (2026-01-01, tags: question)\n')
+})
+
+test('closeByText by the user adds no note', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.todo')); await writeFile(join(dir, '.todo/todo.md'), DONE_FILE)
+  await closeByText(offlineIo(), { root: dir, here: null, text: 'repo item', byClaude: false })
+  assert.match(await read(dir), /- \[x\] repo item \(2026-01-01, tags: question\)\n$/)
+})
+
+test('closeByText with no match fails and writes nothing', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.todo')); await writeFile(join(dir, '.todo/todo.md'), DONE_FILE)
+  assert.equal(await closeByText(offlineIo(), { root: dir, here: 'a', text: 'nope', byClaude: true }), 'TODO_FAILED: no open item matches: nope')
+  assert.equal(await read(dir), DONE_FILE)
+})
+
+test('closeByText does not match an item of another worktree', async () => {
+  const dir = await scratch(); await mkdir(join(dir, '.todo')); await writeFile(join(dir, '.todo/todo.md'), DONE_FILE)
+  assert.equal(await closeByText(offlineIo(), { root: dir, here: 'a', text: 'other', byClaude: false }), 'TODO_FAILED: no open item matches: other')
+  assert.equal(await read(dir), DONE_FILE)
+})
+
+test('closeByText on a missing file fails without creating it', async () => {
+  const dir = await scratch()
+  assert.equal(await closeByText(offlineIo(), { root: dir, here: null, text: 'x', byClaude: false }), 'TODO_FAILED: no open item matches: x')
+  await assert.rejects(access(join(dir, '.todo/todo.md')))
+})

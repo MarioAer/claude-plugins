@@ -27,7 +27,13 @@ export function modeOf(text) {
   if (mode === 'review') return 'review'
   if (text === '') return 'empty'
   if (listFilter(text) !== null) return 'list-tag'
+  if (/^done\s+\S/i.test(text)) return 'done'
   return 'add'
+}
+
+// The item text of a `done <text>` argument.
+export function doneText(text) {
+  return text.replace(/^done\s+/i, '').trim()
 }
 
 // The one tag of a `list #<tag>` argument, lowercased; null for anything else.
@@ -353,6 +359,26 @@ async function edit(io, root, change) {
     await io.write(path, lines.join('\n'))
     return true
   })
+}
+
+// Closes the one open item of the view whose text, without metadata and ignoring case, is text.
+// Claude's close gets a `done by claude` note. A missing file is never created.
+export async function closeByText(io, { root, here, text, byClaude }) {
+  const failed = `TODO_FAILED: no open item matches: ${text}`
+  if ((await io.read(`${root}/.todo/todo.md`)) === null) return failed
+  const wanted = text.toLowerCase()
+  let closed = null
+  await edit(io, root, (lines) => {
+    const match = viewItems(openItems(lines.join('\n')), here).find((item) => stripMeta(item).toLowerCase() === wanted)
+    if (match === undefined) return null
+    let index = lines.indexOf(`- [ ] ${match}`)
+    lines[index] = `- [x] ${match}`
+    while (index + 1 < lines.length && lines[index + 1].startsWith('  - ')) index++
+    if (byClaude) lines.splice(index + 1, 0, `  - ${io.today()}: done by claude`)
+    closed = stripMeta(match)
+    return lines
+  })
+  return closed === null ? failed : `TODO_DONE: ${closed}\n${DATA_NOTE}`
 }
 
 export function markDone(io, root, item) {
