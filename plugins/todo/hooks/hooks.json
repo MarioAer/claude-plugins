@@ -16,32 +16,11 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Read|Edit|Write",
         "hooks": [
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/allow-todo-write.sh\""
-          }
-        ]
-      }
-    ],
-    "UserPromptExpansion": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/todo-hook.sh\""
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Skill",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/todo-hook.sh\""
           }
         ]
       }

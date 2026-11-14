@@ -1,7 +1,7 @@
 // Todo mod: answers typed /todo commands and Claude's own Skill call inside Claude Code, and
 // draws a toast, a transient band and a review pane. Loads on Claude Code 2.1.292 or later; where it
-// does not load, hooks/todo_hook.py and the skill behave as in 0.2.1. Item text never reaches a
-// shell: subprocesses take argument vectors and the text is never one of them.
+// does not load, the skill performs the steps itself (skills/capture/fallback.md). Item text never
+// reaches a shell: subprocesses take argument vectors and the text is never one of them.
 import * as store from './store.js'
 import { localDate } from './io.js'
 
@@ -11,7 +11,7 @@ const INSIDE = 'TODO_FAILED: the session directory is inside .git or .claude'
 // The mod's own /todo, registered as immediate so it runs while Claude is mid-turn. A skill may
 // not share a registered command's name, which is why the skill is named capture.
 const COMMAND = 'todo'
-const ARGUMENT_HINT = '[<task text> | list | review]'
+const ARGUMENT_HINT = '[<task text> | list | review | done <text>]'
 
 // A bare /todo remembers the session's cwd; the next prompt typed by the person is the item.
 const CAPTURE_MS = 10 * 60 * 1000
@@ -26,7 +26,7 @@ export function resetCapture() { capture = null; warned = false; turnAdds = 0 }
 
 // What the band and the pane draw from. Written only from events, never while drawing.
 const BAND_MS = 10000
-const EMPTY_VIEW = { root: null, items: [], order: [], notes: {}, bandUntil: 0, pane: null, capture: null }
+const EMPTY_VIEW = { root: null, here: null, items: [], order: [], notes: {}, bandUntil: 0, pane: null, capture: null }
 
 async function getView($) {
   const { value } = await $.state.get({ plugin: 'todo', key: 'view' })
@@ -58,10 +58,21 @@ export function colorOf(tag, order) {
   return store.PALETTE[index % store.PALETTE.length]
 }
 
+// The view's items in display order: in the main checkout one block per scope (repo-wide first, then
+// each worktree), each grouped by tag; in a worktree, its own and the repo-wide items grouped by tag.
+// Exported for tests.
+export function scopeBlocks(items, order, here) {
+  const scoped = here === null && items.some((item) => store.itemWorktree(item) !== null)
+  if (!scoped) return [{ worktree: undefined, groups: arrange(items, order) }]
+  const scopes = []
+  for (const item of items) if (!scopes.includes(store.itemWorktree(item))) scopes.push(store.itemWorktree(item))
+  return scopes.map((worktree) => ({ worktree, groups: arrange(items.filter((item) => store.itemWorktree(item) === worktree), order) }))
+}
+
 // The view's items (display order), tag order and notes from a fresh read.
-async function loadView(io, root) {
-  const { items, order, notes } = await store.listWithOrder(io, root)
-  return { items: arrange(items, order).flatMap((g) => g.items), order, notes }
+async function loadView(io, root, here) {
+  const { items, order, notes } = await store.listWithOrder(io, root, here)
+  return { items: scopeBlocks(items, order, here).flatMap((b) => b.groups.flatMap((g) => g.items)), order, notes }
 }
 
 export function summary(pane) {
@@ -69,13 +80,13 @@ export function summary(pane) {
 }
 
 // Refreshes the open items and shows the band for BAND_MS; a timer redraws once it lapses.
-async function showBand($, root) {
+async function showBand($, root, here) {
   let loaded = { items: [], order: [], notes: {} }
-  try { loaded = await loadView(modsIo($), root) } catch { /* the refusal was already reported */ }
+  try { loaded = await loadView(modsIo($), root, here) } catch { /* the refusal was already reported */ }
   // An open pane keeps its cursor, clamped to the fresh list; an emptied list ends the review.
   const before = await getView($)
   const pane = before.pane && loaded.items.length > 0 ? { ...before.pane, index: Math.min(before.pane.index, loaded.items.length - 1) } : null
-  await setView($, (current) => ({ ...current, root, ...loaded, bandUntil: Date.now() + BAND_MS, pane }))
+  await setView($, (current) => ({ ...current, root, here, ...loaded, bandUntil: Date.now() + BAND_MS, pane }))
   if (before.pane !== null && pane === null) {
     await $.ui.close({ id: PANE })
     $.ui.toast(summary(before.pane))
@@ -91,7 +102,7 @@ async function renderBand($, e, next) {
   const { Box, Text, Button } = $.ui.resolve(e)
   return Box({ gap: 1, children: [
     Text({ dimColor: true, children: `Todo: ${view.items.length} open` }),
-    Button({ key: 'review', label: 'review', hotkey: 'r', plain: true, onPress: () => openPane($, view.root) }),
+    Button({ key: 'review', label: 'review', hotkey: 'r', plain: true, onPress: () => openPane($, view.root, view.here) }),
   ] })
 }
 
@@ -101,10 +112,10 @@ const WINDOW = 10
 // Below this many columns the detail card goes first and shows only the latest note.
 const NARROW = 60
 
-async function openPane($, root) {
-  const loaded = await loadView(modsIo($), root)
+async function openPane($, root, here) {
+  const loaded = await loadView(modsIo($), root, here)
   const pane = { index: 0, noteFor: null, tagsFor: null, draft: null, lastDone: null, done: 0, notes: 0, retagged: 0 }
-  await setView($, (view) => ({ ...view, root, ...loaded, pane }))
+  await setView($, (view) => ({ ...view, root, here, ...loaded, pane }))
   await $.ui.open({ id: PANE, title: 'Todo review', focus: true, closeOnEscape: true })
 }
 
@@ -115,7 +126,7 @@ async function refreshPane($, keep, counts = {}) {
   const view = await getView($)
   if (view.pane === null) return
   let loaded = { items: view.items, order: view.order, notes: view.notes }
-  try { loaded = await loadView(modsIo($), view.root) } catch { /* keep what was shown */ }
+  try { loaded = await loadView(modsIo($), view.root, view.here) } catch { /* keep what was shown */ }
   const pane = { ...view.pane, ...counts, noteFor: null, tagsFor: null, draft: null }
   if (loaded.items.length === 0) {
     await setView($, (v) => ({ ...v, ...loaded, pane: null }))
@@ -225,12 +236,15 @@ export function itemMeta(item) {
 }
 
 // List entries in display order, headings included, and the cursor's entry. Exported for tests.
-export function listEntries(items, order) {
+export function listEntries(items, order, here = null) {
   const entries = []
   let position = 0
-  for (const group of arrange(items, order)) {
-    entries.push({ heading: group.tag })
-    for (const item of group.items) entries.push({ item, index: position++ })
+  for (const block of scopeBlocks(items, order, here)) {
+    if (block.worktree !== undefined) entries.push({ worktreeHeading: block.worktree })
+    for (const group of block.groups) {
+      entries.push({ heading: group.tag })
+      for (const item of group.items) entries.push({ item, index: position++ })
+    }
   }
   return entries
 }
@@ -256,8 +270,11 @@ async function renderPane($, e, next) {
   const chips = (item) => store.itemTags(item).map((tag) => Text({ color: colorOf(tag, view.order), children: `#${tag}` }))
 
   // The list: a header with the focus badge, then the rows around the cursor.
-  const { shown, above, below } = windowOf(listEntries(view.items, view.order), pane.index)
+  const { shown, above, below } = windowOf(listEntries(view.items, view.order, view.here ?? null), pane.index)
   const rows = shown.map((entry) => {
+    if (entry.worktreeHeading !== undefined) {
+      return Text({ bold: true, children: entry.worktreeHeading === null ? 'repo' : `worktree ${entry.worktreeHeading}` })
+    }
     if (entry.item === undefined) {
       return entry.heading === null
         ? Text({ bold: true, dimColor: true, children: 'untagged' })
@@ -362,9 +379,9 @@ async function captureSubmit($, value) {
   const text = store.normalize(value)
   await $.ui.close({ id: CAPTURE_PANE })
   if (text === '') return
-  const { root, marker } = await performAdd($, view.capture.cwd, text, false)
+  const { root, here, marker } = await performAdd($, view.capture.cwd, text, false)
   $.ui.toast(replyFor(marker))
-  await showBand($, root)
+  await showBand($, root, here)
 }
 
 // The input is drawn from the draft, so a redraw (the band timer) keeps what was typed.
@@ -405,6 +422,7 @@ export function replyFor(marker) {
   const first = marker.split('\n')[0]
   if (first.startsWith('TODO_ADDED: ')) return `Added to todo list: ${first.slice('TODO_ADDED: '.length)}`
   if (first.startsWith('TODO_DUPLICATE: ')) return `Already on todo list: ${first.slice('TODO_DUPLICATE: '.length)}`
+  if (first.startsWith('TODO_DONE: ')) return `Done: ${first.slice('TODO_DONE: '.length)}`
   return `Todo failed: ${first.replace(/^TODO_FAILED: /, '')}`
 }
 
@@ -424,18 +442,22 @@ export function contextFor(marker) {
   return `${first}\nRecorded by the todo plugin; the skill text was not loaded. Reply with exactly one line: ${replyFor(marker)}. Then resume the current task without further comment. ${store.DATA_NOTE}`
 }
 
-// Adds text under the session's root; every refusal becomes a TODO_FAILED marker.
+// Adds text, or closes the item a `done <text>` names, under the session's root; every refusal
+// becomes a TODO_FAILED marker. here is the session's worktree, null in the main checkout.
 async function performAdd($, cwd, text, byClaude) {
   const io = modsIo($)
   const located = await store.locate(io, cwd)
-  const { root, branch } = located
-  if (store.rootRefused(located)) return { root, marker: INSIDE }
+  const { root, branch, worktree: here } = located
+  if (store.rootRefused(located)) return { root, here, marker: INSIDE }
   try {
-    const marker = await store.add(io, { root, branch, text, byClaude })
+    if (store.modeOf(text) === 'done') {
+      return { root, here, marker: await store.closeByText(io, { root, here, text: store.doneText(text), byClaude }) }
+    }
+    const marker = await store.add(io, { root, branch, worktree: here, text, byClaude })
     if (marker.startsWith('TODO_ADDED: ')) turnAdds++
-    return { root, marker }
+    return { root, here, marker }
   } catch (error) {
-    if (error instanceof store.Refused) return { root, marker: `TODO_FAILED: ${error.message}` }
+    if (error instanceof store.Refused) return { root, here, marker: `TODO_FAILED: ${error.message}` }
     throw error
   }
 }
@@ -443,13 +465,13 @@ async function performAdd($, cwd, text, byClaude) {
 async function listText($, cwd, tag = null) {
   const io = modsIo($)
   const located = await store.locate(io, cwd)
-  const { root } = located
-  if (store.rootRefused(located)) return { root, text: replyFor(INSIDE) }
+  const { root, worktree: here } = located
+  if (store.rootRefused(located)) return { root, here, text: replyFor(INSIDE) }
   try {
-    const items = await store.list(io, root, tag)
-    return { root, items, text: items.length ? store.numbered(items) : 'Todo list is empty.' }
+    const items = await store.list(io, root, { tag, here })
+    return { root, here, items, text: items.length ? store.numbered(items) : 'Todo list is empty.' }
   } catch (error) {
-    if (error instanceof store.Refused) return { root, text: `Todo failed: ${error.message}` }
+    if (error instanceof store.Refused) return { root, here, text: `Todo failed: ${error.message}` }
     throw error
   }
 }
@@ -471,20 +493,21 @@ async function runCommand($, e, next) {
     const listed = await listText($, cwd)
     if (!listed.items) return { text: listed.text }
     if (listed.items.length === 0) return { text: 'Todo list is empty.' }
-    await openPane($, listed.root)
+    await openPane($, listed.root, listed.here)
     return { text: 'Todo review opened.' }
   }
   if (mode === 'list' || mode === 'list-tag') {
     const listed = await listText($, cwd, mode === 'list-tag' ? store.listFilter(text) : null)
-    await showBand($, listed.root)
+    await showBand($, listed.root, listed.here)
     return { text: listed.text }
   }
-  const { root, marker } = await performAdd($, cwd, text, false)
+  const { root, here, marker } = await performAdd($, cwd, text, false)
   const line = replyFor(marker)
   const kind = e.origin?.kind
   if (kind !== 'plugin') $.ui.toast(line)
-  await showBand($, root)
+  await showBand($, root, here)
   if (e.command !== COMMAND && kind !== 'plugin') return { text: line }
+  if (mode === 'done' && kind !== 'plugin') return { text: line }
   return answerAdd(marker, kind, (await $.session.surfaces()).length > 0)
 }
 
@@ -503,7 +526,7 @@ async function autocomplete($, e, next) {
   const located = await store.locate(io, await $.session.cwd())
   if (store.rootRefused(located)) return next(e)
   try {
-    const { order } = await store.listWithOrder(io, located.root)
+    const { order } = await store.listWithOrder(io, located.root, located.worktree)
     const suggestions = tagSuggestions(e.text, e.token, order)
     return suggestions.length > 0 ? { suggestions } : next(e)
   } catch (error) {
@@ -535,7 +558,7 @@ async function turnComplete($, e, next) {
   const io = modsIo($)
   const located = await store.locate(io, await $.session.cwd())
   if (!store.rootRefused(located)) {
-    try { open = ` · ${(await store.list(io, located.root)).length} open` } catch (error) { if (!(error instanceof store.Refused)) throw error }
+    try { open = ` · ${(await store.list(io, located.root, { here: located.worktree })).length} open` } catch (error) { if (!(error instanceof store.Refused)) throw error }
   }
   return withLine(result, e.answer, `Todo: +${added} this turn${open}`)
 }
@@ -555,13 +578,14 @@ async function startSession($, e, next) {
 async function callSkill($, e, next) {
   if (e.skill !== SKILL) return next(e)
   const text = store.normalize(e.args)
-  if (store.modeOf(text) !== 'add') return next(e)
+  const mode = store.modeOf(text)
+  if (mode !== 'add' && mode !== 'done') return next(e)
   // A tool.call answer would precede the permission rules; a deny rule on this call must still win.
   const { decision } = await $.tool.check({ tool: 'Skill', input: { skill: e.skill, args: e.args } })
   if (decision === 'deny') return next(e)
-  const { root, marker } = await performAdd($, await $.session.cwd(), text, true)
+  const { root, here, marker } = await performAdd($, await $.session.cwd(), text, true)
   $.ui.toast(replyFor(marker))
-  await showBand($, root)
+  await showBand($, root, here)
   return { result: { success: true, commandName: SKILL, status: 'inline' }, context: [contextFor(marker)] }
 }
 
@@ -574,10 +598,10 @@ async function submitPrompt($, e, next) {
   if (Date.now() > pending.until) return next(e)
   const text = store.normalize(e.text)
   if (text === '' || text.startsWith('/')) return next(e)
-  const { root, marker } = await performAdd($, pending.cwd, text, false)
+  const { root, here, marker } = await performAdd($, pending.cwd, text, false)
   const line = replyFor(marker)
   $.ui.toast(line)
-  await showBand($, root)
+  await showBand($, root, here)
   return { drop: line }
 }
 

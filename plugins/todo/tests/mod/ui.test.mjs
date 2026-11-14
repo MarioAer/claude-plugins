@@ -290,6 +290,13 @@ test('itemMeta, listEntries and windowOf', () => {
   assert.deepEqual(windowOf(entries, 1, 2), { shown: entries.slice(2), above: 1, below: 0 })
 })
 
+test('listEntries adds worktree headings in the main checkout only', () => {
+  const items = ['r (2026-01-01)', 'a (2026-01-01, worktree: wa)']
+  const label = (e) => e.worktreeHeading !== undefined ? `wt:${e.worktreeHeading}` : e.heading === undefined ? e.index : `#${e.heading}`
+  assert.deepEqual(listEntries(items, [], null).map(label), ['wt:null', '#null', 0, 'wt:wa', '#null', 1])
+  assert.deepEqual(listEntries(['a (2026-01-01, worktree: wa)', 'r (2026-01-01)'], [], 'wa').map(label), ['#null', 0, 1])
+})
+
 test('the pane draws coloured group headings, rows in display order and tag chips', async () => {
   const dir = await repo(TAGGED3); const { $, fire } = session(dir)
   await fire($, 'command.run', command('review'))

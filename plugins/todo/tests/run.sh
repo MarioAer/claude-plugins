@@ -62,7 +62,10 @@ mkdir -p "$WORK/wtrepo" "$WORK/nogit/.claude"
 git -C "$WORK/wtrepo" init -q
 git -C "$WORK/wtrepo" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m init
 git -C "$WORK/wtrepo" worktree add -q -b wt "$WORK/wtrepo/.claude/worktrees/wt"
-expect "worktree under .claude" allow Write "$WORK/wtrepo/.claude/worktrees/wt/.todo/todo.md"
+expect "main checkout todo from a worktree" allow Write "$WORK/wtrepo/.todo/todo.md" "$WORK/wtrepo/.claude/worktrees/wt"
+expect "worktree-local todo" none Write "$WORK/wtrepo/.claude/worktrees/wt/.todo/todo.md"
+expect "Read of the main checkout todo from a worktree" allow Read "$WORK/wtrepo/.todo/todo.md" "$WORK/wtrepo/.claude/worktrees/wt"
+expect "Read of another file in .todo" none Read "$WORK/wtrepo/.todo/evil.md" "$WORK/wtrepo/.claude/worktrees/wt"
 expect "non-git cwd .claude root" none Write "$WORK/nogit/.claude/.todo/todo.md"
 
 # Write may only create; existing files must be changed with Edit.
@@ -86,13 +89,85 @@ rc=$?
 if [ "$rc" -eq 0 ] &&
   grep -q '"hookEventName": *"SessionStart"' <<<"$out" &&
   grep -q 'todo:capture' <<<"$out" &&
-  python3 -c 'import json,sys; json.loads(sys.argv[1])' "$out" 2>/dev/null; then
+  jq -e . >/dev/null 2>&1 <<<"$out"; then
   echo "PASS session-start emits valid JSON context naming the skill"
   passed=$((passed + 1))
 else
   echo "FAIL session-start: rc=$rc output=$out"
   failed=$((failed + 1))
 fi
+
+# Reminder after compact, clear and resume: the open items of the session's view, read-only.
+context_of() { jq -r '.hookSpecificOutput.additionalContext' <<<"$1"; }
+session_start() { printf '{"hook_event_name":"SessionStart","source":"%s","cwd":"%s"}' "$1" "$2" | bash "$SESSION_HOOK" 2>/dev/null; }
+check_reminder() {
+  local label=$1 got=$2 want=$3
+  if [ "$got" = "$want" ]; then
+    echo "PASS $label"
+    passed=$((passed + 1))
+  else
+    echo "FAIL $label: got [$got] want [$want]"
+    failed=$((failed + 1))
+  fi
+}
+RREPO="$WORK/remind"
+mkdir -p "$RREPO"
+git -C "$RREPO" init -q -b main
+git -C "$RREPO" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m init
+git -C "$RREPO" worktree add -q -b a "$RREPO/.claude/worktrees/a"
+git -C "$RREPO" worktree add -q -b b "$RREPO/.claude/worktrees/b"
+mkdir -p "$RREPO/.todo"
+printf '# Todo\n\n- [ ] repo one (2026-01-01, branch: main, tags: x)\n- [ ] gone one (2026-01-01, worktree: dead)\n- [ ] mine "quoted" (2026-01-01, branch: a, worktree: a)\n- [ ] theirs (2026-01-01, worktree: b)\n- [x] closed (2026-01-01, worktree: a)\n' >"$RREPO/.todo/todo.md"
+before=$(cat "$RREPO/.todo/todo.md")
+out=$(session_start startup "$RREPO/.claude/worktrees/a")
+check_reminder "startup adds no reminder" "$(context_of "$out" | grep -c 'Open todo items')" 0
+out=$(session_start compact "$RREPO/.claude/worktrees/a")
+check_reminder "compact in a worktree lists own items, then repo-wide, without removed or other worktrees" \
+  "$(context_of "$out" | grep -o 'Open todo items.*')" 'Open todo items (2): 1. mine "quoted" 2. repo one'
+check_reminder "reminder output is valid JSON" "$(jq -e . >/dev/null 2>&1 <<<"$out" && echo ok)" ok
+out=$(session_start resume "$RREPO")
+check_reminder "resume in the main checkout lists repo-wide first, then worktrees" \
+  "$(context_of "$out" | grep -o 'Open todo items.*')" 'Open todo items (3): 1. repo one 2. mine "quoted" 3. theirs'
+check_reminder "the reminder never writes the file" "$(cat "$RREPO/.todo/todo.md")" "$before"
+{
+  printf '# Todo\n\n'
+  for n in 1 2 3 4 5 6 7 8 9; do printf -- '- [ ] item %s (2026-01-01)\n' "$n"; done
+} >"$RREPO/.todo/todo.md"
+out=$(session_start clear "$RREPO")
+check_reminder "nine items list eight" "$(context_of "$out" | grep -o 'Open todo items.*')" \
+  'Open todo items (9): 1. item 1 2. item 2 3. item 3 4. item 4 5. item 5 6. item 6 7. item 7 8. item 8'
+out=$(session_start compact "$WORK/fresh")
+check_reminder "no todo file adds no reminder" "$(context_of "$out" | grep -c 'Open todo items')" 0
+# shellcheck disable=SC2016  # literal text the rule must contain
+check_reminder "the rule tells Claude to close parked questions with done" "$(context_of "$out" | grep -c '#question.*done <item text>')" 1
+
+# 0.8: no Python hook; the skill texts describe the main-checkout list, the worktree field and done.
+check_text() {
+  local label=$1
+  shift
+  if "$@"; then
+    echo "PASS $label"
+    passed=$((passed + 1))
+  else
+    echo "FAIL $label"
+    failed=$((failed + 1))
+  fi
+}
+# shellcheck disable=SC2016  # $1 expands in the child shell
+check_text "no Python in hooks or skills" bash -c '! grep -rIqi python "$1/hooks" "$1/skills"' _ "$ROOT"
+# shellcheck disable=SC2016  # $1 expands in the child shell
+check_text "hooks.json routes Read to the allow hook" grep -q '"matcher": "Read|Edit|Write"' "$ROOT/hooks/hooks.json"
+# shellcheck disable=SC2016  # $1 expands in the child shell
+check_text "hooks.json registers no prompt or tool hook" bash -c '! grep -Eq "UserPromptExpansion|PostToolUse" "$1/hooks/hooks.json"' _ "$ROOT"
+# shellcheck disable=SC2016  # literal text the procedures must contain
+check_text "fallback.md locates the main checkout" grep -Fq 'git rev-parse --path-format=absolute --git-common-dir' "$ROOT/skills/capture/fallback.md"
+check_text "fallback.md writes the worktree field" grep -Fq ', worktree: ' "$ROOT/skills/capture/fallback.md"
+check_text "fallback.md has a Done section" grep -q '^## Done' "$ROOT/skills/capture/fallback.md"
+check_text "SKILL.md knows TODO_DONE" grep -Fq 'TODO_DONE' "$ROOT/skills/capture/SKILL.md"
+# shellcheck disable=SC2016  # $1 expands in the child shell
+check_text "SKILL.md drops the hook-only markers" bash -c '! grep -Eq "TODO_(REVIEW|LIST|EMPTY)" "$1"' _ "$ROOT/skills/capture/SKILL.md"
+# shellcheck disable=SC2016  # literal text the skill must contain
+check_text "SKILL.md routes done to fallback.md" grep -Fq '`done <text>`' "$ROOT/skills/capture/SKILL.md"
 
 # Skill context budget: SKILL.md is injected on every invocation, including Claude's own adds,
 # so it holds only the decision logic; the fallback and review procedures live in files read on demand.
@@ -168,11 +243,7 @@ fi
 
 echo "$passed passed, $failed failed"
 
-# The add hook has its own fixtures; run them here so CI needs one entry point.
-echo
-bash "$ROOT/tests/add-hook.sh" || failed=$((failed + 1))
-
-# The mod's tests need Node 22 or later (node:test); the hook tests above do not.
+# The mod's tests need Node 22 or later (node:test); the shell checks above do not.
 echo
 if command -v node >/dev/null 2>&1; then
   node --test "$ROOT/tests/mod/*.test.mjs" || failed=$((failed + 1))
