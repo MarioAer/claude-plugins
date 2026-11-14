@@ -67,7 +67,8 @@ test('a worktree under .claude adds and lists', async () => {
   execFileSync('git', ['-C', dir, 'worktree', 'add', '-q', '-b', 'wt', wt])
   const { $, fire } = session(wt)
   await fire($, 'command.run', command('x'))
-  assert.equal((await fire($, 'command.run', command('list'))).out.text, `1. x (${TODAY}, branch: wt)`)
+  assert.equal((await fire($, 'command.run', command('list'))).out.text, `1. x (${TODAY}, branch: wt, worktree: wt)`)
+  assert.match(await read(dir), /- \[ \] x \(.*, worktree: wt\)\n$/, 'the list lives in the main checkout')
 })
 
 test('other commands pass through untouched', async () => {
@@ -202,7 +203,7 @@ test('session.start registers /todo as immediate', async () => {
   assert.equal($.log.registered.length, 1)
   const [spec] = $.log.registered
   assert.ok(spec.description.length > 0)
-  assert.deepEqual({ ...spec, description: 'x' }, { name: 'todo', description: 'x', argumentHint: '[<task text> | list | review]', immediate: true })
+  assert.deepEqual({ ...spec, description: 'x' }, { name: 'todo', description: 'x', argumentHint: '[<task text> | list | review | done <text>]', immediate: true })
 })
 
 test('a refused registration toasts once and session.start still passes on', async () => {
@@ -317,4 +318,41 @@ test('the turn line calls next and keeps a line another hook set', async () => {
   await fire($, 'command.run', typed('one'))
   const out = (await fire($, 'turn.complete', { ...done, answer: 'A' }, { text: 'Other: line' })).out
   assert.equal(out.text, 'Other: line\nTodo: +1 this turn · 1 open')
+})
+
+// done (0.8).
+test('replyFor maps TODO_DONE to Done', () => {
+  assert.equal(replyFor('TODO_DONE: x\nnote'), 'Done: x')
+})
+
+test('typed /todo done closes the item and toasts Done', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('fix login'))
+  const { out } = await fire($, 'command.run', command('done Fix Login'))
+  assert.equal(out.text, 'Done: fix login')
+  assert.equal($.log.toasts.at(-1), 'Done: fix login')
+  assert.match(await read(dir), new RegExp(`- \\[x\\] fix login \\(${TODAY}, branch: main\\)\\n$`))
+})
+
+test("Claude's done is answered with TODO_DONE context and a done by claude note", async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('pagination? #question'))
+  const { passed, out } = await fire($, 'tool.call', skillCall('todo:capture', 'done pagination?'))
+  assert.equal(passed, false)
+  assert.ok(out.context[0].startsWith('TODO_DONE: pagination?\n'))
+  assert.match(await read(dir), new RegExp(`- \\[x\\] pagination\\? .*\\n  - ${TODAY}: done by claude\\n$`))
+})
+
+test("a deny rule still blocks Claude's done", async () => {
+  const dir = await repo(); const s1 = session(dir)
+  await s1.fire(s1.$, 'command.run', command('keep open'))
+  const { $, fire } = session(dir, { toolCheck: { decision: 'deny', reason: 'permissions.deny' } })
+  assert.equal((await fire($, 'tool.call', skillCall('todo:capture', 'done keep open'))).passed, true)
+  assert.match(await read(dir), /- \[ \] keep open/)
+})
+
+test('typed done with no match fails and adds nothing', async () => {
+  const dir = await repo(); const { $, fire } = session(dir)
+  assert.equal((await fire($, 'command.run', command('done nothing here'))).out.text, 'Todo failed: no open item matches: nothing here')
+  await assert.rejects(read(dir))
 })

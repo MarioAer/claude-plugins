@@ -23,6 +23,7 @@ export type Capture = {
 
 export type View = {
   root: string | null
+  here: string | null
   items: string[]
   order: string[]
   notes: Record<string, Note[]>
