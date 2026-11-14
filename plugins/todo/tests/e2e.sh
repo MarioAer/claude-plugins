@@ -168,8 +168,18 @@ S16() {
   "${G[@]}" worktree add -q "$WORK/s16-wt" -b wt
   cd "$WORK/s16-wt" || return
   todo "/todo from worktree" >/dev/null
-  check "file at worktree root" has_line .todo/todo.md "- [ ] from worktree ($TODAY, branch: wt)"
+  check "worktree item in the main checkout's list" has_line "$WORK/s16/.todo/todo.md" "- [ ] from worktree ($TODAY, branch: wt, worktree: s16-wt)"
+  check "no list inside the worktree" absent .todo
   check "worktree status clean" clean_status
+}
+
+S39() {
+  new_repo "$WORK/s39"
+  todo "/todo close me later" >/dev/null
+  out=$(todo_json "/todo done Close Me Later")
+  check "typed done starts no model turn" [ "$(jq -r '.num_turns' <<<"$out")" = "0" ]
+  check "done confirms" contains "$(jq -r '.result' <<<"$out")" "Done: close me later"
+  check "item closed" has_line .todo/todo.md "- [x] close me later ($TODAY, branch: main)"
 }
 
 S17() {
@@ -248,7 +258,7 @@ S26() {
 S27() {
   new_repo "$WORK/s27"
   todo "/todo fallback item" --settings '{"disableAllHooks": true}' \
-    --allowedTools "Read" "Write" "Edit" "Bash(git rev-parse --show-toplevel)" "Bash(git branch --show-current)" "Bash(date +%F)" >/dev/null
+    --allowedTools "Read" "Write" "Edit" "Bash(git rev-parse --show-toplevel)" "Bash(git rev-parse --path-format=absolute --git-common-dir)" "Bash(git branch --show-current)" "Bash(date +%F)" >/dev/null
   check "fallback adds the item with hooks disabled" has_line .todo/todo.md "- [ ] fallback item ($TODAY, branch: main)"
 }
 
@@ -274,7 +284,7 @@ S30() {
   log=$(transcript "Use the todo skill to record the item 'mod self item'. Do nothing else.")
   calls=$(jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") | .name' <<<"$log")
   check "Claude's add makes only the Skill call" [ "$calls" = "Skill" ]
-  check "skill body not loaded" lacks "$log" "## 0. Hook result"
+  check "skill body not loaded" lacks "$log" "## 0. Mod result"
   check "item carries by: claude" has_line .todo/todo.md "- [ ] mod self item ($TODAY, branch: main, by: claude)"
 }
 
@@ -309,11 +319,11 @@ S35() {
 S36() {
   new_repo "$WORK/s36"
   todo "/todo fallback tagged #ops" --settings '{"disableAllHooks": true}' \
-    --allowedTools "Read" "Write" "Edit" "Bash(git rev-parse --show-toplevel)" "Bash(git branch --show-current)" "Bash(date +%F)" >/dev/null
+    --allowedTools "Read" "Write" "Edit" "Bash(git rev-parse --show-toplevel)" "Bash(git rev-parse --path-format=absolute --git-common-dir)" "Bash(git branch --show-current)" "Bash(date +%F)" >/dev/null
   check "fallback stores the tags field" has_line .todo/todo.md "- [ ] fallback tagged ($TODAY, branch: main, tags: ops)"
 }
 
-ALL=(S1 S2 S3 S4 S5 S8 S10 S11 S13 S14 S15 S16 S17 S18 S19 S20 S21 S22 S23 S24 S26 S27 S28 S29 S30 S31 S34 S35 S36)
+ALL=(S1 S2 S3 S4 S5 S8 S10 S11 S13 S14 S15 S16 S17 S18 S19 S20 S21 S22 S23 S24 S26 S27 S28 S29 S30 S31 S34 S35 S36 S39)
 [ $# -gt 0 ] && ALL=("$@")
 
 echo "todo e2e: model=$MODEL, $(claude --version 2>/dev/null)"

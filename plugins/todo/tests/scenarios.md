@@ -28,7 +28,7 @@ Scenarios for `plugins/todo/skills/capture/SKILL.md`. Rows marked `e2e` run head
 | S13 | e2e | Any | `/todo review the auth retry logic` | Added as an item; review not started |
 | S14 | e2e | File whose last line has no trailing newline | `/todo x` | New item on its own line; old item intact |
 | S15 | e2e | Project has its own tracked `.gitignore` | `/todo x` | Project `.gitignore` unchanged |
-| S16 | e2e | Invoked from `src/sub/`, and from a linked worktree | `/todo x` | `.todo/todo.md` at the root of that worktree; none in `src/sub/`; `git status` clean |
+| S16 | e2e | Invoked from `src/sub/`, and from a linked worktree | `/todo x` | `.todo/todo.md` at the git root; from the worktree, the item lands in the main checkout's list with `worktree: <worktree folder>`; none in `src/sub/` or the worktree; `git status` clean |
 | S17 | e2e | File with open and done items | `/todo list` | Only open items, numbered from 1, each with its `(date, ...)` metadata unchanged |
 | S18 | e2e | Item `dedupe me` already open | `/todo dedupe me` | No second line; prints `Already on todo list: dedupe me` |
 | S19 | e2e | Headless session | `/todo` | Prints `What should go on the todo list?`; no file created |
@@ -42,7 +42,7 @@ Scenarios for `plugins/todo/skills/capture/SKILL.md`. Rows marked `e2e` run head
 | S27 | e2e | Hooks disabled (`disableAllHooks`); fallback tools approved | `/todo fallback item` | The skill's fallback adds the item |
 | S28 | e2e | Git repo, hooks enabled | Prompt asks Claude to record an item with the skill | Only the `Skill` call in the transcript; item carries `, by: claude)` |
 | S29 | e2e | Git repo, mod loaded (Claude Code 2.1.287 or later) | `/todo mod item` | The mod answers: no model turn (`num_turns` 0); output `Added to todo list: mod item`; item written once |
-| S30 | e2e | Git repo, mod loaded | Prompt asks Claude to record an item with the skill | Only the `Skill` call; the skill body (`## 0. Hook result`) never enters the transcript; item carries `, by: claude)` |
+| S30 | e2e | Git repo, mod loaded | Prompt asks Claude to record an item with the skill | Only the `Skill` call; the skill body (`## 0. Mod result`) never enters the transcript; item carries `, by: claude)` |
 | S31 | e2e | Mod loaded, 1 open item | `/todo list` | No model turn; output is the numbered list |
 | S32 | manual | Interactive terminal, 2 open items | `/todo review`; keys `s`, `n` + note, `d` | Pane opens focused; skip, note written under item 1 at once, item 2 marked done; pane closes with `Review done: 1 done, 1 skipped, 1 notes`; band shows `Todo: 1 open` for about ten seconds after an add |
 | S33 | manual | Interactive terminal | `/todo`, then type `fix the flaky test` | Question printed by the command; the next prompt is dropped with `Added to todo list: fix the flaky test`; no model turn |
@@ -51,3 +51,4 @@ Scenarios for `plugins/todo/skills/capture/SKILL.md`. Rows marked `e2e` run head
 | S36 | e2e | Hooks disabled, fallback tools approved | `/todo fallback tagged #ops` | The skill's fallback stores `, tags: ops` |
 | S37 | manual | Interactive terminal, items with two tags and one without | `/todo review`; `t`, type `docs`, Enter | Pane shows one heading per tag in its own colour, untagged last; the item moves under `#docs` with the cursor on it; `list #docs` then shows it |
 | S38 | manual | Interactive terminal, mod loaded | Ask Claude for a slow task (`sleep 30` through Bash); while it runs, type `/todo mid-turn check` | Toast `Added to todo list: mid-turn check` before the turn ends; the item is in `.todo/todo.md`; Claude's turn continues and its transcript shows no todo output |
+| S39 | e2e | Mod loaded, item `close me later` open | `/todo done Close Me Later` | No model turn; `Done: close me later`; the line becomes `- [x]` |
