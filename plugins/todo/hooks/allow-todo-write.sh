@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# PreToolUse hook: allow Edit/Write of <root>/.todo/todo.md and <root>/.todo/.gitignore,
+# PreToolUse hook: allow Edit/Write of <root>/.todo/todo.md and <root>/.todo/.gitignore, and Read of
+# <root>/.todo/todo.md (outside the working directory when the session is in a linked worktree),
 # where <root> is the main checkout of the session's repository (or cwd outside git). Write is allowed only to
 # create a file. The skill declares no allowed-tools (they stop Claude's own Skill call from loading the
 # skill), so this hook gives review and the fallback a narrow, deterministic grant.
@@ -8,7 +9,7 @@ set -u
 
 input=$(cat)
 
-[[ "$input" =~ \"tool_name\"[[:space:]]*:[[:space:]]*\"(Edit|Write)\" ]] || exit 0
+[[ "$input" =~ \"tool_name\"[[:space:]]*:[[:space:]]*\"(Read|Edit|Write)\" ]] || exit 0
 tool=${BASH_REMATCH[1]}
 # Values containing escaped characters do not match and therefore get no decision.
 [[ "$input" =~ \"file_path\"[[:space:]]*:[[:space:]]*\"([^\"\\]*)\" ]] || exit 0
@@ -23,8 +24,8 @@ esac
 case "/$path/" in
 */../* | */./*) exit 0 ;;
 esac
-case "$path" in
-*/.todo/todo.md | */.todo/.gitignore) ;;
+case "$tool:$path" in
+*:*/.todo/todo.md | Edit:*/.todo/.gitignore | Write:*/.todo/.gitignore) ;;
 *) exit 0 ;;
 esac
 

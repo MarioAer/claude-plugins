@@ -190,8 +190,8 @@ export async function checkLinks(io, folder) {
   }
 }
 
-// Basenames of the worktrees git lists, prunable ones (directory gone) left out; null when git fails,
-// so a failure never closes anything. The main checkout is listed too, which is harmless.
+// Basenames of the linked worktrees git lists, prunable ones (directory gone) and the main checkout
+// left out; null when git fails, so a failure never closes anything.
 export async function liveWorktrees(io, root) {
   let result
   try {
@@ -205,6 +205,8 @@ export async function liveWorktrees(io, root) {
     const lines = entry.split('\n')
     const path = lines.find((line) => line.startsWith('worktree '))
     if (path === undefined || lines.some((line) => line === 'prunable' || line.startsWith('prunable '))) continue
+    // The main checkout is not a worktree items can name; a worktree sharing its basename must still close.
+    if (path.slice('worktree '.length) === root) continue
     live.add(path.slice(path.lastIndexOf('/') + 1))
   }
   return live
@@ -254,7 +256,13 @@ async function freshContent(io, root) {
   if (!openItems(content).some((item) => itemWorktree(item) !== null)) return content
   const live = await liveWorktrees(io, root)
   if (live === null || !openItems(content).some((item) => removed(item, live))) return content
-  await closeRemoved(io, root, live)
+  try {
+    await closeRemoved(io, root, live)
+  } catch (error) {
+    if (!(error instanceof Refused)) throw error
+    // Closing failed (locked, or not writable): still show the list, without the removed items.
+    return content.split('\n').map((line) => (line.startsWith('- [ ] ') && removed(line.slice(6), live) ? `- [x] ${line.slice(6)}` : line)).join('\n')
+  }
   return (await io.read(path)) ?? ''
 }
 

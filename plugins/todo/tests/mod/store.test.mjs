@@ -464,3 +464,22 @@ test('closeByText on a missing file fails without creating it', async () => {
   assert.equal(await closeByText(offlineIo(), { root: dir, here: null, text: 'x', byClaude: false }), 'TODO_FAILED: no open item matches: x')
   await assert.rejects(access(join(dir, '.todo/todo.md')))
 })
+
+// Final review fixes.
+test('a refused close still lists, leaving out items of removed worktrees', async () => {
+  const dir = await scratch(); repoWithWorktree(dir, 'live'); await mkdir(join(dir, '.todo/.lock'), { recursive: true })
+  const content = '# Todo\n\n- [ ] gone (2026-01-01, worktree: dead)\n- [ ] here (2026-01-01, worktree: live)\n'
+  await writeFile(join(dir, '.todo/todo.md'), content)
+  assert.deepEqual(await list(io(), dir), ['here (2026-01-01, worktree: live)'])
+  assert.equal(await read(dir), content)
+  await rmdir(join(dir, '.todo/.lock'))
+})
+
+test('a removed worktree named like the main checkout is closed', async () => {
+  const base = await scratch(); const dir = join(base, 'proj'); await mkdir(dir)
+  gitInit(dir); execFileSync('git', ['-C', dir, ...G, 'commit', '-q', '--allow-empty', '-m', 'init'])
+  const wt = join(base, 'other/proj')
+  execFileSync('git', ['-C', dir, 'worktree', 'add', '-q', '-b', 'twin', wt])
+  execFileSync('git', ['-C', dir, 'worktree', 'remove', wt])
+  assert.equal((await liveWorktrees(nodeIo(), dir)).has('proj'), false)
+})

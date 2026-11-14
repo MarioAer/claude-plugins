@@ -64,6 +64,8 @@ git -C "$WORK/wtrepo" -c user.name=t -c user.email=t@example.invalid -c commit.g
 git -C "$WORK/wtrepo" worktree add -q -b wt "$WORK/wtrepo/.claude/worktrees/wt"
 expect "main checkout todo from a worktree" allow Write "$WORK/wtrepo/.todo/todo.md" "$WORK/wtrepo/.claude/worktrees/wt"
 expect "worktree-local todo" none Write "$WORK/wtrepo/.claude/worktrees/wt/.todo/todo.md"
+expect "Read of the main checkout todo from a worktree" allow Read "$WORK/wtrepo/.todo/todo.md" "$WORK/wtrepo/.claude/worktrees/wt"
+expect "Read of another file in .todo" none Read "$WORK/wtrepo/.todo/evil.md" "$WORK/wtrepo/.claude/worktrees/wt"
 expect "non-git cwd .claude root" none Write "$WORK/nogit/.claude/.todo/todo.md"
 
 # Write may only create; existing files must be changed with Edit.
@@ -153,6 +155,8 @@ check_text() {
 }
 # shellcheck disable=SC2016  # $1 expands in the child shell
 check_text "no Python in hooks or skills" bash -c '! grep -rIqi python "$1/hooks" "$1/skills"' _ "$ROOT"
+# shellcheck disable=SC2016  # $1 expands in the child shell
+check_text "hooks.json routes Read to the allow hook" grep -q '"matcher": "Read|Edit|Write"' "$ROOT/hooks/hooks.json"
 # shellcheck disable=SC2016  # $1 expands in the child shell
 check_text "hooks.json registers no prompt or tool hook" bash -c '! grep -Eq "UserPromptExpansion|PostToolUse" "$1/hooks/hooks.json"' _ "$ROOT"
 # shellcheck disable=SC2016  # literal text the procedures must contain
