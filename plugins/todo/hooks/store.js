@@ -1,4 +1,4 @@
-// Todo store: the file rules of hooks/todo_hook.py, over an injected io object.
+// Todo store: every file rule of the todo list, over an injected io object.
 // io: read(path) -> string|null, write(path, text), stat(path) -> {kind,isLink,mtimeMs,realPath?}|null,
 //     run(argv, {cwd, timeoutMs}) -> {exitCode, stdout, stderr}, sleep(ms), today() -> 'YYYY-MM-DD'.
 export const HEADER =
@@ -265,8 +265,8 @@ export async function list(io, root, { tag = null, here = null } = {}) {
   return tag === null ? items : items.filter((item) => itemTags(item).includes(tag))
 }
 
-// The lock is a directory, as in the Python hook, so both implementations serialise against each
-// other across sessions. The file API has no atomic mkdir, hence the subprocess.
+// The lock is a directory, so sessions in every worktree serialise against each other. The file
+// API has no atomic mkdir, hence the subprocess.
 async function acquire(io, lock) {
   for (let attempt = 0; attempt < LOCK.tries; attempt++) {
     const made = await io.run(['mkdir', lock], { timeoutMs: 2000 })

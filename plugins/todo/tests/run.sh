@@ -62,7 +62,8 @@ mkdir -p "$WORK/wtrepo" "$WORK/nogit/.claude"
 git -C "$WORK/wtrepo" init -q
 git -C "$WORK/wtrepo" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m init
 git -C "$WORK/wtrepo" worktree add -q -b wt "$WORK/wtrepo/.claude/worktrees/wt"
-expect "worktree under .claude" allow Write "$WORK/wtrepo/.claude/worktrees/wt/.todo/todo.md"
+expect "main checkout todo from a worktree" allow Write "$WORK/wtrepo/.todo/todo.md" "$WORK/wtrepo/.claude/worktrees/wt"
+expect "worktree-local todo" none Write "$WORK/wtrepo/.claude/worktrees/wt/.todo/todo.md"
 expect "non-git cwd .claude root" none Write "$WORK/nogit/.claude/.todo/todo.md"
 
 # Write may only create; existing files must be changed with Edit.
@@ -138,6 +139,32 @@ check_reminder "no todo file adds no reminder" "$(context_of "$out" | grep -c 'O
 # shellcheck disable=SC2016  # literal text the rule must contain
 check_reminder "the rule tells Claude to close parked questions with done" "$(context_of "$out" | grep -c '#question.*done <item text>')" 1
 
+# 0.8: no Python hook; the skill texts describe the main-checkout list, the worktree field and done.
+check_text() {
+  local label=$1
+  shift
+  if "$@"; then
+    echo "PASS $label"
+    passed=$((passed + 1))
+  else
+    echo "FAIL $label"
+    failed=$((failed + 1))
+  fi
+}
+# shellcheck disable=SC2016  # $1 expands in the child shell
+check_text "no Python in hooks or skills" bash -c '! grep -rIqi python "$1/hooks" "$1/skills"' _ "$ROOT"
+# shellcheck disable=SC2016  # $1 expands in the child shell
+check_text "hooks.json registers no prompt or tool hook" bash -c '! grep -Eq "UserPromptExpansion|PostToolUse" "$1/hooks/hooks.json"' _ "$ROOT"
+# shellcheck disable=SC2016  # literal text the procedures must contain
+check_text "fallback.md locates the main checkout" grep -Fq 'git rev-parse --path-format=absolute --git-common-dir' "$ROOT/skills/capture/fallback.md"
+check_text "fallback.md writes the worktree field" grep -Fq ', worktree: ' "$ROOT/skills/capture/fallback.md"
+check_text "fallback.md has a Done section" grep -q '^## Done' "$ROOT/skills/capture/fallback.md"
+check_text "SKILL.md knows TODO_DONE" grep -Fq 'TODO_DONE' "$ROOT/skills/capture/SKILL.md"
+# shellcheck disable=SC2016  # $1 expands in the child shell
+check_text "SKILL.md drops the hook-only markers" bash -c '! grep -Eq "TODO_(REVIEW|LIST|EMPTY)" "$1"' _ "$ROOT/skills/capture/SKILL.md"
+# shellcheck disable=SC2016  # literal text the skill must contain
+check_text "SKILL.md routes done to fallback.md" grep -Fq '`done <text>`' "$ROOT/skills/capture/SKILL.md"
+
 # Skill context budget: SKILL.md is injected on every invocation, including Claude's own adds,
 # so it holds only the decision logic; the fallback and review procedures live in files read on demand.
 SKILL_DIR="$ROOT/skills/capture"
@@ -212,11 +239,7 @@ fi
 
 echo "$passed passed, $failed failed"
 
-# The add hook has its own fixtures; run them here so CI needs one entry point.
-echo
-bash "$ROOT/tests/add-hook.sh" || failed=$((failed + 1))
-
-# The mod's tests need Node 22 or later (node:test); the hook tests above do not.
+# The mod's tests need Node 22 or later (node:test); the shell checks above do not.
 echo
 if command -v node >/dev/null 2>&1; then
   node --test "$ROOT/tests/mod/*.test.mjs" || failed=$((failed + 1))

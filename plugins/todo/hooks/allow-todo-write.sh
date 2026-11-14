@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PreToolUse hook: allow Edit/Write of <root>/.todo/todo.md and <root>/.todo/.gitignore,
-# where <root> is the git root of the session's cwd (or cwd outside git). Write is allowed only to
+# where <root> is the main checkout of the session's repository (or cwd outside git). Write is allowed only to
 # create a file. The skill declares no allowed-tools (they stop Claude's own Skill call from loading the
 # skill), so this hook gives review and the fallback a narrow, deterministic grant.
 # Any other input yields no decision.
@@ -30,8 +30,15 @@ esac
 
 # The target must be exactly <root>/.todo/<file>, compared with symlinks resolved.
 [ -d "$cwd" ] || exit 0
-# A work tree root is never inside .git; a worktree may sit under .claude/worktrees.
-if ! root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null); then
+# The root is the main checkout, so every worktree writes the repository's one list; a repository
+# without one (bare) uses the current work tree. Outside git, a .git or .claude directory is refused.
+if top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) &&
+  common=$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+  case "$common" in
+  */.git) root=${common%/.git} ;;
+  *) root=$top ;;
+  esac
+else
   root=$cwd
   case "/$root/" in
   */.claude/* | */.git/*) exit 0 ;;
