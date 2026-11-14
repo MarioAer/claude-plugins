@@ -2,7 +2,7 @@
 
 A Claude Code plugin from the [`marioaer-plugins`](https://github.com/MarioAer/claude-plugins) marketplace.
 
-Records tasks you want to defer while Claude Code keeps working on the current task. Items go to `.todo/todo.md` in the project root as a flat checklist.
+Records work you want to park while Claude Code keeps working on the current task: deferred tasks, out-of-scope findings and open questions. Each repository has one list, `.todo/todo.md` in the main checkout, shared by every worktree and session.
 
 ## Installation
 
@@ -15,62 +15,89 @@ Records tasks you want to defer while Claude Code keeps working on the current t
 
 | Command | Action |
 |---|---|
-| `/todo <text>` | Add an item, also while Claude is working, and confirm with a toast; Claude's turn continues untouched. Trailing `#tags` (letters, digits, `-`, `_`, up to 8) are stored as tags. |
+| `/todo <text>` | Add an item, also while Claude is working; Claude's turn continues untouched. Trailing `#tags` (letters, digits, `-`, `_`, up to 8) are stored as tags. |
 | `/todo` | Open a one-line input for the item (headless: ask once, then take the next prompt). |
-| `/todo list` | Show open items as a numbered list. |
+| `/todo list` | Show the open items of this session's view as a numbered list. |
+| `/todo list #<tag>` | Only the open items carrying that tag. |
+| `/todo done <text>` | Close the open item whose text matches, ignoring case and metadata. With no match nothing is added. |
+| `/todo review` | Review the open items one by one: done, note, retag. |
 | `/todo … #` | With the mod loaded, typing `#` after `/todo` completes the tags already in the list. |
-| `/todo list #<tag>` | Show only the open items carrying that tag. |
-| `/todo review` | For each open item, answer done, skip, update or quit; changes are shown, then written once. |
 
-If another skill or command already uses the name `todo`, use the namespaced form `/todo:capture`.
+If another skill or command already uses the name `todo`, use `/todo:capture`.
 
-Upgrading from 0.6: the skill is now `capture`, so the namespaced command is `/todo:capture` (formerly `/todo:todo`), and a `Skill(todo:todo)` permission rule must be renamed to `Skill(todo:capture)`.
-
-Item format:
+## Items
 
 ```
-- [ ] add tests for the parser (2026-10-06, branch: feature/parser)
-- [x] remove dead retry helper (2026-10-02, branch: main, by: claude)
-  - 2026-10-04: blocked by API change
-- [ ] fix login (2026-10-05, branch: main, tags: auth, urgent)
+- [ ] add tests for the parser (2026-10-06, branch: main)
+- [ ] fix flaky login test (2026-11-14, branch: feat/x, worktree: feat-x)
+- [ ] retry helper swallows errors (2026-11-14, branch: feat/x, by: claude)
+- [x] does the API need pagination? (2026-11-14, branch: feat/x, worktree: feat-x, by: claude, tags: question)
+  - 2026-11-20: worktree removed
 ```
 
 - The branch is omitted outside git and on a detached HEAD.
-- Tags are lowercase names inside the metadata; two items that differ only by their tags are duplicates.
-- `by: claude` marks items Claude added on its own: concrete, out-of-scope work found during a task, at most two per task.
-- An argument of exactly `list` or `review` selects that mode; any other text, including `review the auth code`, is added as an item.
+- `worktree:` names the linked worktree (its folder name) the item belongs to; items without it are repo-wide.
+- `by: claude` marks items Claude added on its own: concrete, out-of-scope work found during a task, at most two per task, and questions it parks with `#question`.
+- Tags are lowercase names inside the metadata. Two open items with the same text, ignoring case and metadata, are duplicates.
+- Notes (`  - <date>: <text>`) sit under their item. Items are never deleted, only closed with `[x]`.
+
+## Worktrees
+
+The list lives in the main checkout (found with `git rev-parse --git-common-dir`), so an item captured in a worktree is not lost when the worktree goes. Inside a worktree:
+
+| Who adds | Scope |
+|---|---|
+| You, `/todo <text>` | this worktree |
+| You, with `#repo` among the trailing tags | repo-wide; `#repo` is not stored |
+| Claude on its own | repo-wide: out-of-scope findings outlive the branch |
+| Claude on its own, tagged `#question` | this worktree |
+
+- **View.** In a worktree, list, review and the counts show that worktree's items first, then the repo-wide ones; other worktrees' items are hidden. The main checkout shows everything, repo-wide first, then one block per worktree.
+- **Cleanup.** When `git worktree list` no longer shows a worktree (removed, or its folder deleted), the mod's next read closes its open items with the note `worktree removed`. If git fails, nothing is closed.
+- **Duplicates across scopes.** Adding text that is already open in another worktree makes the existing item repo-wide, so it outlives both.
+- Outside git the list is in the session directory. In a repository without a main checkout (a bare repository), each worktree has its own list.
+
+## Reminder after compact, clear and resume
+
+A `SessionStart` hook (`hooks/session-start.sh`) adds two things to Claude's context:
+
+- On every start, a short rule (about 100 tokens): record out-of-scope findings with the skill instead of only mentioning them; park questions as `#question` items and close them with `done <item text>` once answered or moot.
+- After `/compact`, `/clear` and on resume, the open items of the view, at most eight: `Open todo items (N): 1. … 2. …`. The hook only reads; items of removed worktrees are left out.
 
 ## Mod
 
-On Claude Code 2.1.292 or later the plugin also loads a mod (`hooks/mod.js`, a hooks module that runs inside Claude Code; 2.1.287 to 2.1.291 refuse the whole module because it completes `#tags` through `prompt.autocomplete`, which they lack). With it:
+On Claude Code 2.1.292 or later the plugin loads a mod (`hooks/mod.js`, a hooks module that runs inside Claude Code). With it:
 
-- The mod registers `/todo` as an immediate command, so a typed `/todo <text>` is recorded at once, even while Claude is mid-turn; the toast is the only confirmation and nothing enters the transcript. Headless runs, where no toast is drawn, print the reply line instead. Where the engine refuses the registration (older versions, or another plugin owns `/todo`), one toast says so and `/todo:capture` works as before but waits for the turn to end.
-- A typed `/todo <text>`, `/todo list` and `/todo review` are answered by the mod: no model turn starts and no skill text is loaded, so they cost no tokens. A bare `/todo` opens a one-line `Add to todo` input above the prompt (Enter adds, empty Enter or Esc cancels), so a message you type to Claude is never taken as the item; in headless runs it prints the question and takes your next prompt as the item, also without a turn.
-- Claude's own `Skill(todo:capture)` call is answered by the mod: the item is recorded, Claude reads one context line instead of the skill text, and confirms in one line (about 30 tokens).
-- A turn that added items, yours or Claude's, ends with one line under the answer, such as `Todo: +2 this turn · 7 open`; a turn that added nothing shows no line.
-- Every add, duplicate or failure shows a toast. A band above the prompt shows `Todo: N open` for ten seconds after any todo call and while review is open; it is never shown otherwise.
-- `/todo review` opens a pane with the open items grouped by tag and a detail card for the item under the cursor (date, branch, tags and its notes). Keys: `j`/`k` move, `g`/`e` jump to the first/last item, `d` done, `u` undo the last done, `n` note (stays on the item), `t` tags (lists the known tags), `q` close. Each action is written at once. While the pane has the keyboard its border is cyan and the header shows `● keys active`; otherwise it is dimmed and `ctrl+x tab` focuses it. Closing shows a summary toast. In headless runs, the VS Code extension and the SDK, where nothing is drawn, review falls back to the question loop below.
-- The pane groups items by their first tag, one heading per tag in its own colour (stable while the tag exists in the file), untagged items last. `t` edits the current item's tags: space or comma separated, `#` optional, empty clears; invalid names are named in a toast and dropped.
+- `/todo` is an immediate command: a typed add, list or done is handled at once, even mid-turn, without a model turn and without loading skill text. The toast is the confirmation; headless runs print the reply line. Where the engine refuses the registration (older versions, or another plugin owns `/todo`), one toast says so and `/todo:capture` works but waits for the turn to end.
+- A bare `/todo` opens a one-line `Add to todo` input above the prompt (Enter adds, empty Enter or Esc cancels), so a message you type to Claude is never taken as the item.
+- Claude's own `Skill(todo:capture)` call, an add or a `done`, is answered by the mod: Claude reads one context line instead of the skill text and confirms in one line.
+- A turn that added items ends with one line under the answer, such as `Todo: +2 this turn · 7 open`.
+- A band above the prompt shows `Todo: N open` for ten seconds after any todo call and while review is open.
+- `/todo review` opens a pane: open items grouped by tag (and by worktree in the main checkout), a detail card for the item under the cursor. Keys: `j`/`k` move, `g`/`e` first/last, `d` done, `u` undo the last done, `n` note, `t` tags, `q` close. Each action is written at once. In headless runs, the VS Code extension and the SDK, review falls back to a question loop.
 
-Where the mod does not load (older versions, `--safe-mode`, `disableAllHooks`, WSL sessions in the desktop app), everything behaves as in 0.2.1: the command hook performs adds and lists and the skill handles the rest.
+Without the mod (Claude Code before 2.1.292, `--safe-mode`, `disableAllHooks`, WSL sessions in the desktop app), Claude performs adds, lists, done and review itself by following `skills/capture/fallback.md` and `review.md`. That costs a few tool calls; `git rev-parse` and `date` may ask for permission. Items of removed worktrees are closed on the mod's next read, not by the fallback.
 
 ## Why `.todo/` and not `.claude/`
 
-- `.todo/.gitignore` contains `*`, so the folder ignores itself. The todo list stays untracked, survives branch switches and never appears in pull requests, without any change to tracked files.
-- Claude Code treats `.claude/` and `.git/` as protected paths: every write there prompts, and allow rules cannot pre-approve it. A todo list in either location would interrupt each capture.
+- `.todo/.gitignore` contains `*`, so the folder ignores itself. The list stays untracked, survives branch switches and never appears in pull requests, without any change to tracked files.
+- Claude Code treats `.claude/` and `.git/` as protected paths: every write there prompts, and allow rules cannot pre-approve it.
 
 ## Permissions
 
-- The skill declares no `allowed-tools`. With `allowed-tools`, Claude's own `Skill(todo:todo)` call returned only `Execute skill: todo:todo` without the skill body (Claude Code 2.1.286 and 2.1.293), and the item was never recorded. Adds and lists are performed by the add hook below. Flows that still run tool calls through the model may ask for permission for `git rev-parse`, `git branch` or `date`: answering the question after a bare `/todo`, and every flow when hooks are disabled. For `/todo review` the hook hands the skill the file path and the open items, so the review starts with no shell call.
-- A `PreToolUse` hook (`hooks/allow-todo-write.sh`) allows writes to exactly two files, `.todo/todo.md` and `.todo/.gitignore`, and only in the project root (the git root of the session directory, symlinks resolved); `Write` only when it creates the file. The hook is needed because the skill declares no `allowed-tools` (see above), so nothing else pre-approves these writes for review and the fallback. The hook gives no decision for paths with `..`, a `.todo/` inside `.claude/` or `.git/` when the session directory is outside a git work tree, symlinks, or any other file, so those get the normal prompt.
-- Other writes in the same turn still prompt.
-- A `SessionStart` hook (`hooks/session-start.sh`) adds two sentences of context to each session, telling Claude to record out-of-scope findings with the skill instead of only mentioning them. Without it, Claude noticed such defects but did not record them. The cost is about 60 tokens per session in every project where the plugin is enabled.
-- A hook (`hooks/todo-hook.sh`, running `hooks/todo_hook.py`) performs adds and lists itself, on `UserPromptExpansion` for a typed `/todo` and on `PostToolUse` for Claude's own `Skill` call. It writes only inside `<root>/.todo/` (`todo.md`, `.gitignore`, and a transient `.lock` directory), never when the session directory is inside `.git/`, or inside `.claude/` outside a git work tree (a worktree under `.claude/worktrees/` is a normal root), refusing symlinks like the write hook above, and returns the result as context, so an add shows no file or shell tool calls. A call refused by a deny rule never reaches `PostToolUse` and writes nothing; the mod asks the engine's permission decision before answering the call and passes a denied call through, so the rule holds there too. The hook needs `python3`; without it, or with hooks disabled, the skill performs the steps itself as in 0.1.1, following `skills/capture/fallback.md`.
-- The mod runs with your permissions inside Claude Code, outside the Bash sandbox, as every mod does. It writes only `<root>/.todo/` (`todo.md`, `.gitignore`, a transient `.lock` directory), refuses symlinks and the same session directories as the command hook, and runs only `git rev-parse`, `mkdir` and `rmdir` with fixed arguments; item text is never a subprocess argument.
-- The mod answers Claude's own `Skill(todo:capture)` call itself, so that call never reaches the skill; no other tool call is answered or approved by the plugin.
-- With the mod loaded the skill text is not loaded at all; without it, the skill file holds only the decision logic (about 1,000 tokens per invocation). The manual add and list procedure (`fallback.md`) and the review procedure (`review.md`) are read on demand, so a hook-handled add does not load them.
+- The mod runs with your permissions inside Claude Code, outside the Bash sandbox, as every mod does. It writes only `<root>/.todo/` (`todo.md`, `.gitignore`, a transient `.lock` directory), refuses symlinks, refuses a session directory inside `.git/` (or inside `.claude/` outside a git work tree), and runs only `git rev-parse`, `git worktree list`, `mkdir` and `rmdir` with fixed arguments; item text is never a subprocess argument.
+- The mod answers Claude's own `Skill(todo:capture)` call only when the engine's permission decision is not `deny`; a deny rule on `Skill(todo:capture)` is left to the engine, which refuses it. No other tool call is answered or approved.
+- A `PreToolUse` hook (`hooks/allow-todo-write.sh`) lets the fallback write exactly two files without a prompt, `<root>/.todo/todo.md` and `<root>/.todo/.gitignore`, where `<root>` is the main checkout; `Write` only when it creates the file. Paths with `..`, symlinks, a `.todo/` anywhere else and every other file get the normal prompt.
+- The skill declares no `allowed-tools`: with them, Claude's own `Skill(todo:capture)` call returned only `Execute skill: todo:capture` without the skill body (Claude Code 2.1.286 and 2.1.293).
 
-Claude Code 2.1.293 ran Claude's own `Skill(todo:capture)` call without a permission prompt in manual mode. To block self-initiated captures, add `Skill(todo:capture)` to `permissions.deny`; the mod checks that decision first and leaves a denied call to the engine, which refuses it.
+To block self-initiated captures, add `Skill(todo:capture)` to `permissions.deny`.
+
+## Changes in 0.8
+
+- geparkt is merged into todo: park a question as an item tagged `#question`; uninstall geparkt.
+- One list per repository in the main checkout, with the `worktree:` field, scoped views and cleanup of removed worktrees. A list kept inside a worktree by 0.7 is not migrated; its open items can be re-added from the main checkout.
+- `/todo done <text>` closes an item; an argument starting with `done ` is never item text.
+- The Python hook (`hooks/todo_hook.py`) is gone; without the mod, the skill performs the steps itself.
+- After compact, clear and resume the open items come back as a reminder.
 
 ## License
 
