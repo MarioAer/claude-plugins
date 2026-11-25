@@ -251,14 +251,17 @@ export function listEntries(items, order, here = null) {
 
 // Splits list entries into the groups the pane draws as one Box each. A heading opens a new group
 // unless the open one holds no item yet (a worktree heading over its first tag heading); rows a
-// window starts on mid-group form a group without a heading. Exported for tests.
+// window starts on mid-group form a group without a heading; headings a window ends on, cut off
+// from their rows, are dropped (the "more" count below already counts those rows). Exported for tests.
 export function groupEntries(entries) {
+  const hasItem = (group) => group.some((member) => member.item !== undefined)
   const groups = []
   for (const entry of entries) {
-    const opens = entry.item === undefined && groups.length > 0 && groups.at(-1).some((member) => member.item !== undefined)
+    const opens = entry.item === undefined && groups.length > 0 && hasItem(groups.at(-1))
     if (opens || groups.length === 0) groups.push([])
     groups.at(-1).push(entry)
   }
+  if (groups.length > 0 && !hasItem(groups.at(-1))) groups.pop()
   return groups
 }
 
@@ -278,10 +281,12 @@ async function renderPane($, e, next) {
   const { Box, Text, Button, Input } = $.ui.resolve(e)
   const focused = e.props?.isFocused === true
   const narrow = (e.props?.bodyColumns ?? NARROW) < NARROW
-  // The terminal and VS Code draw in character cells: a step there is whole blank rows and a
-  // percentage rounds up to whole cells. They keep their density so the keys and help still fit;
-  // a graphical surface gets room between blocks.
-  const cells = e.surface === 'terminal' || e.surface === 'vscode'
+  // Desktop and the phones lay out in points and get room between blocks. Every other surface
+  // (the terminal and VS Code draw in character cells, where a step is whole blank rows and a
+  // percentage rounds up to whole cells, or one this code doesn't know) keeps its density, so the
+  // keys and help still fit.
+  const graphical = e.surface === 'desktop' || e.surface === 'mobile'
+  const cells = !graphical
   const apart = cells ? 0 : 'md'
   const total = view.items.length
   const current = view.items[pane.index]
@@ -302,10 +307,12 @@ async function renderPane($, e, next) {
     }
     const isCursor = entry.index === pane.index
     const mark = isCursor ? (focused ? '▶' : '▷') : ' '
-    // The focused cursor: a cell surface inverts the text, a graphical one fills the whole row.
+    // The focused cursor: a cell surface inverts the text; a graphical one draws the pointer and
+    // text in the accent color, as Claude Code marks a selected row, with no fill under the chips.
     const highlight = isCursor && focused
-    return Box({ gap: 1, ...(highlight && !cells ? { backgroundColor: 'subtle' } : {}), children: [
-      Text({ bold: isCursor, ...(cells ? { inverse: highlight } : {}), wrap: 'truncate', children: `${mark} ${entry.index + 1}. ${store.stripMeta(entry.item)}` }),
+    const look = cells ? { inverse: highlight } : highlight ? { color: 'suggestion' } : {}
+    return Box({ gap: 1, children: [
+      Text({ bold: isCursor, ...look, wrap: 'truncate', children: `${mark} ${entry.index + 1}. ${store.stripMeta(entry.item)}` }),
       ...chips(entry.item),
     ] })
   }
@@ -356,9 +363,9 @@ async function renderPane($, e, next) {
     ]
     help = 'Enter replaces the tags, empty Enter clears them, Esc returns to the prompt.'
   } else {
-    // Movement keys on one row, actions on the next. A wide graphical pane lines them up in equal
-    // columns; a cell surface or a narrow pane lets them flow, as a fixed fifth would clip there.
-    const columns = !cells && !narrow
+    // Movement keys on one row, actions on the next. A wide desktop pane lines them up in equal
+    // columns; a cell surface, a phone or a narrow pane lets them flow, as a fixed fifth would clip there.
+    const columns = e.surface === 'desktop' && !narrow
     const key = (name, label, hotkey, onPress, dim = false) => Box({ ...(columns ? { width: '20%' } : {}), children: [
       Button({ key: name, label, hotkey, plain: true, ...(dim || !focused ? { dimColor: true } : {}), onPress }),
     ] })

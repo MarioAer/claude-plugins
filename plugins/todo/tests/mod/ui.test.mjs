@@ -113,14 +113,29 @@ test('focus is visible: accent border, inverse cursor and a badge; unfocused dim
   assert.equal(find(tree, (n) => n.type === 'Button' && n.key === 'done').dimColor, true)
 })
 
-test('a graphical surface fills the focused cursor row instead of inverting its text', async () => {
+test('a graphical surface marks the focused cursor with the accent color, as Claude Code marks a selected row', async () => {
   const dir = await repo(TWO); const { $, fire } = session(dir)
   await fire($, 'command.run', command('review'))
-  let tree = (await fire($, 'ui.render', { ...paneSite, surface: 'desktop' })).out
-  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '▶ 1. alpha' && n.inverse !== true))
-  assert.equal(cursorRow(tree).backgroundColor, 'subtle', 'the focused cursor row is filled across its width')
-  tree = (await fire($, 'ui.render', { ...paneSite, surface: 'desktop', props: { ...paneSite.props, isFocused: false } })).out
-  assert.equal(cursorRow(tree).backgroundColor, undefined, 'no fill while unfocused')
+  for (const surface of ['desktop', 'mobile']) {
+    let tree = (await fire($, 'ui.render', { ...paneSite, surface })).out
+    const text = find(tree, (n) => n.type === 'Text' && n.children === '▶ 1. alpha')
+    assert.equal(text.color, 'suggestion', `${surface}: accent pointer and text`)
+    assert.notEqual(text.inverse, true)
+    assert.equal(cursorRow(tree).backgroundColor, undefined, `${surface}: no fill under the colored tag chips`)
+    tree = (await fire($, 'ui.render', { ...paneSite, surface, props: { ...paneSite.props, isFocused: false } })).out
+    assert.equal(find(tree, (n) => n.type === 'Text' && n.children === '▷ 1. alpha').color, undefined, 'no accent while unfocused')
+  }
+})
+
+test('a surface the pane does not know keeps the compact layout and the inverse cursor', async () => {
+  const dir = await repo(TWO); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  for (const surface of [undefined, 'watch']) {
+    const tree = (await fire($, 'ui.render', { ...paneSite, surface })).out
+    assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '▶ 1. alpha' && n.inverse === true), String(surface))
+    assert.equal(parentOf(tree, (n) => n.type === 'Text' && n.children === 'Todo · 2 open · 0 done').marginBottom, 0)
+    assert.equal(parentOf(tree, (n) => n.type === 'Button' && n.key === 'done').width, undefined)
+  }
 })
 
 const FIVE = '# Todo\n\n' + ['a', 'b', 'c', 'd', 'e'].map((x, i) => `- [ ] ${x} (2026-01-0${i + 1})\n`).join('')
@@ -183,6 +198,18 @@ test('a narrow graphical pane lets the keys flow instead of fixed columns', asyn
   assert.equal(moves.columnGap, 2)
 })
 
+test('a phone gets the graphical spacing but lets the keys flow, whatever width it reports', async () => {
+  for (const bodyColumns of [undefined, 80]) {
+    const { header, groups, card, cells, moves, actions } = await spacing('mobile', bodyColumns)
+    assert.equal(header.marginBottom, 'md')
+    assert.equal(groups.gap, 'md')
+    assert.equal(card.gap, 'md')
+    for (const cell of cells) assert.equal(cell.width, undefined, `bodyColumns ${bodyColumns}: no fixed fifths on a phone`)
+    assert.equal(moves.columnGap, 2)
+    assert.equal(actions.columnGap, 2)
+  }
+})
+
 for (const surface of ['terminal', 'vscode']) {
   test(`${surface} keeps its density: no blank rows between header, groups or card blocks`, async () => {
     const { header, groups, card, cells, moves, actions } = await spacing(surface)
@@ -203,6 +230,24 @@ test('groupEntries keeps a worktree heading with its first group and gives mid-g
   const tagged = listEntries(['a (2026-01-01, tags: t)', 'b (2026-01-01, tags: t)', 'c (2026-01-01)'], ['t'])
   assert.deepEqual(groupEntries(tagged.slice(2)).map((g) => g.map(label)), [[1], ['#null', 2]], 'rows the window starts on mid-group')
   assert.deepEqual(groupEntries([]), [])
+})
+
+test('groupEntries drops a heading the window cut off from its rows', () => {
+  const label = (e) => e.worktreeHeading !== undefined ? `wt:${e.worktreeHeading}` : e.heading === undefined ? e.index : `#${e.heading}`
+  const tagged = listEntries(['a (2026-01-01, tags: t)', 'b (2026-01-01)'], ['t'])
+  assert.deepEqual(groupEntries(tagged.slice(0, 3)).map((g) => g.map(label)), [['#t', 0]], 'a trailing tag heading')
+  const trees = listEntries(['r (2026-01-01)', 'a (2026-01-01, worktree: wa)'], [], null)
+  assert.deepEqual(groupEntries(trees.slice(0, 5)).map((g) => g.map(label)), [['wt:null', '#null', 0]], 'a trailing worktree and tag heading')
+})
+
+test('the pane never draws a heading with no rows under it at the window edge', async () => {
+  // 10-entry window: #t and its 8 rows, then the untagged heading as the 10th entry, its row cut off.
+  const many = '# Todo\n\n' + Array.from({ length: 8 }, (_, i) => `- [ ] t${i + 1} (2026-01-01, tags: t)\n`).join('') + '- [ ] plain (2026-01-01)\n'
+  const dir = await repo(many); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  const tree = await pane($, fire)
+  assert.ok(!texts(tree).includes('untagged'), 'the cut-off heading is not drawn')
+  assert.ok(texts(tree).includes('▼ 1 more'))
 })
 
 test('a long list draws a window around the cursor with counts above and below', async () => {
