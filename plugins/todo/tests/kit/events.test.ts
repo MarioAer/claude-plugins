@@ -47,3 +47,15 @@ test('module state: the next test sees no pending capture', async ($, on) => {
   await $.prompt.submit(prompt('hello'))
   expect(h.reachedCore).toEqual(['prompt.submit'])
 })
+
+// A second add that meets the first one's lock waits for it on the clock; it does not take the lock for stale.
+test('host: a lock taken a moment ago is not stale', async ($, on) => {
+  const h = host(on)
+  const items = () => (h.files.get(todoFile()) ?? '').split('\n').filter((line) => line.startsWith('- [ ] ')).map((line) => line.slice(6, line.indexOf(' (')))
+  const adds = Promise.all([$.command.run(typed('one')), $.command.run(typed('two'))])
+  await h.clock.settle()
+  expect(items()).toEqual(['one'])            // the second add is asleep on the lock, not past it
+  await h.clock.advance(50)
+  await adds
+  expect(items()).toEqual(['one', 'two'])
+})

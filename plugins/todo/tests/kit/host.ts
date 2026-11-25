@@ -56,7 +56,7 @@ export function host(on: On, options: HostOptions = {}): Host {
   const git = options.git === undefined ? { top: ROOT } : options.git
   const links = new Set(options.links ?? [])
   const files = new Map<string, string>(Object.entries(options.files ?? {}))
-  const locks = new Set<string>()
+  const locks = new Map<string, number>()   // lock path → when mkdir took it, as store.js reads it: Date.now()
   const h: Host = { files, toasts: [], opened: [], closed: [], registered: [], reachedCore: [], clock: mock.clock(on) }
 
   const main = git ? git.main ?? git.top : ROOT
@@ -82,7 +82,9 @@ export function host(on: On, options: HostOptions = {}): Host {
     const text = files.get(e.path)
     if (text !== undefined) return { value: { kind: 'file', size: text.length, isLink, mtimeMs: 0, realPath: e.path } }
     const prefix = `${e.path}/`
-    if (locks.has(e.path) || [...files.keys(), ...locks].some((held) => held.startsWith(prefix))) {
+    const taken = locks.get(e.path)
+    if (taken !== undefined) return { value: { kind: 'dir', size: 0, isLink, mtimeMs: taken, realPath: e.path } }
+    if ([...files.keys(), ...locks.keys()].some((held) => held.startsWith(prefix))) {
       return { value: { kind: 'dir', size: 0, isLink, mtimeMs: 0, realPath: e.path } }
     }
     return next(e)
@@ -101,12 +103,11 @@ export function host(on: On, options: HostOptions = {}): Host {
     }
     if (argv[0] === 'mkdir') {
       if (locks.has(argv[1])) return ran(1, '', 'File exists')
-      locks.add(argv[1])
+      locks.set(argv[1], Date.now())
       return ran(0)
     }
     if (argv[0] === 'rmdir') {
-      locks.delete(argv[1])
-      return ran(0)
+      return locks.delete(argv[1]) ? ran(0) : ran(1, '', 'No such file or directory')
     }
     return next(e)
   })
