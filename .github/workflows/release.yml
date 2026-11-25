@@ -33,9 +33,9 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$TAG is not on main"; exit 1; }
           echo "PLUGIN=$plugin" >>"$GITHUB_ENV"
           echo "VERSION=$version" >>"$GITHUB_ENV"
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
-          version: 2026.10.24
+          version: 2026.11.14
       - name: Lint, structural and unit tests
         run: mise run check
       - name: Publish the release
