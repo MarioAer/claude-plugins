@@ -91,20 +91,36 @@ test('review with no items answers the empty line; headless review passes to cor
   assert.equal((await s2.fire(s2.$, 'command.run', command('review'))).passed, true)
 })
 
+// The Box that directly holds an element matching pred.
+const parentOf = (tree, pred) => find(tree, (n) => n.type === 'Box' && (Array.isArray(n.children) ? n.children : [n.children]).some((c) => c && typeof c === 'object' && pred(c)))
+const cursorRow = (tree) => parentOf(tree, (n) => n.type === 'Text' && /^[▶▷] /.test(String(n.children)))
+
 test('focus is visible: accent border, inverse cursor and a badge; unfocused dims and says how to focus', async () => {
   const dir = await repo(TWO); const { $, fire } = session(dir)
   await fire($, 'command.run', command('review'))
   let tree = await pane($, fire, { isFocused: true })
   assert.ok(find(tree, (n) => n.type === 'Box' && n.borderStyle === 'single' && n.borderColor === 'cyan'))
-  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '▶ 1. alpha' && n.inverse === true))
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '▶ 1. alpha' && n.inverse === true), 'a cell surface keeps the inverse bar')
+  assert.equal(cursorRow(tree).backgroundColor, undefined, 'no Box fill on a cell surface')
   assert.ok(texts(tree).includes('● keys active'))
   assert.equal(find(tree, (n) => n.type === 'Button' && n.key === 'done').dimColor, undefined)
   tree = await pane($, fire, { isFocused: false })
   assert.ok(find(tree, (n) => n.type === 'Box' && n.borderStyle === 'single' && n.borderDimColor === true && n.borderColor === undefined))
-  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '▷ 1. alpha' && n.inverse === false))
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '▷ 1. alpha' && n.inverse !== true))
+  assert.equal(cursorRow(tree).backgroundColor, undefined, 'no fill while unfocused')
   assert.ok(texts(tree).includes('○ not focused'))
   assert.ok(texts(tree).includes('ctrl+x tab to focus · keys go to the prompt'))
   assert.equal(find(tree, (n) => n.type === 'Button' && n.key === 'done').dimColor, true)
+})
+
+test('a graphical surface fills the focused cursor row instead of inverting its text', async () => {
+  const dir = await repo(TWO); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  let tree = (await fire($, 'ui.render', { ...paneSite, surface: 'desktop' })).out
+  assert.ok(find(tree, (n) => n.type === 'Text' && n.children === '▶ 1. alpha' && n.inverse !== true))
+  assert.equal(cursorRow(tree).backgroundColor, 'subtle', 'the focused cursor row is filled across its width')
+  tree = (await fire($, 'ui.render', { ...paneSite, surface: 'desktop', props: { ...paneSite.props, isFocused: false } })).out
+  assert.equal(cursorRow(tree).backgroundColor, undefined, 'no fill while unfocused')
 })
 
 const FIVE = '# Todo\n\n' + ['a', 'b', 'c', 'd', 'e'].map((x, i) => `- [ ] ${x} (2026-01-0${i + 1})\n`).join('')
@@ -124,7 +140,69 @@ test('j and k move one row and stop at the ends; g and e jump to the first and l
   assert.deepEqual($.log.closed, [], 'reaching the end never closes the pane')
   await press(await pane($, fire), 'top')
   assert.equal(cursor(await pane($, fire)), '1. a')
-  assert.ok(texts(await pane($, fire)).some((t) => t.startsWith('Todo · 5 open · 0 done · 1/5')))
+  assert.ok(texts(await pane($, fire)).includes('Todo · 5 open · 0 done'), 'the header drops the n/total position')
+})
+
+// The spacing the pane asks for: the header's bottom margin, the gap between groups and inside
+// the card, the rows' gap inside a group, and each key cell's width.
+const MOVES = ['down', 'up', 'top', 'end']
+const ACTIONS = ['done', 'undo', 'note', 'tags', 'close']
+async function spacing(surface, bodyColumns = 80) {
+  const dir = await repo(TAGGED3); const { $, fire } = session(dir)
+  await fire($, 'command.run', command('review'))
+  const tree = (await fire($, 'ui.render', { ...paneSite, surface, props: { ...paneSite.props, bodyColumns } })).out
+  const header = parentOf(tree, (n) => n.type === 'Text' && n.children === 'Todo · 3 open · 0 done')
+  const group = parentOf(tree, (n) => n.type === 'Text' && n.children === '#build' && n.bold === true)
+  const groups = parentOf(tree, (n) => n === group)
+  const card = find(tree, (n) => n.type === 'Box' && n.borderStyle === 'round')
+  const cells = [...MOVES, ...ACTIONS].map((key) => parentOf(tree, (n) => n.type === 'Button' && n.key === key))
+  const moves = parentOf(tree, (n) => n === cells[0])
+  const actions = parentOf(tree, (n) => n === cells[MOVES.length])
+  return { tree, header, group, groups, card, cells, moves, actions }
+}
+
+test('the pane spaces its rows on a graphical surface: groups apart, rows a step apart, header split, card in two blocks, keys in columns', async () => {
+  const { tree, header, group, groups, card, cells, moves, actions } = await spacing('desktop')
+  assert.equal(header.justifyContent, 'space-between', 'title left, focus badge right')
+  assert.equal(header.marginBottom, 'md')
+  assert.equal(group.rowGap, 'sm', 'rows inside a group sit a step apart')
+  assert.ok(group.children.includes(cursorRow(tree)), 'the group holds its rows')
+  assert.equal(groups.gap, 'md', 'groups sit further apart than rows')
+  assert.equal(groups.children.length, 3, 'one Box per group: #build, #auth and untagged')
+  assert.equal(card.gap, 'md', 'the title block and the notes block sit apart')
+  assert.equal(card.children.length, 2)
+  for (const cell of cells) assert.equal(cell.width, '20%', 'equal key columns, lined up across both rows')
+  assert.equal(moves.children.length, MOVES.length, 'movement keys have a row of their own')
+  assert.equal(actions.children.length, ACTIONS.length, 'action keys have a row of their own')
+  assert.notEqual(moves, actions)
+})
+
+test('a narrow graphical pane lets the keys flow instead of fixed columns', async () => {
+  const { cells, moves } = await spacing('desktop', 40)
+  for (const cell of cells) assert.equal(cell.width, undefined)
+  assert.equal(moves.columnGap, 2)
+})
+
+for (const surface of ['terminal', 'vscode']) {
+  test(`${surface} keeps its density: no blank rows between header, groups or card blocks`, async () => {
+    const { header, groups, card, cells, moves, actions } = await spacing(surface)
+    assert.equal(header.marginBottom, 0)
+    assert.equal(groups.gap, 0)
+    assert.equal(card.gap, 0)
+    assert.equal(groups.children.length, 3, 'still one Box per group')
+    for (const cell of cells) assert.equal(cell.width, undefined, 'a percentage rounds up to whole cells and wraps a third row')
+    assert.equal(moves.columnGap, 2, 'keys flow with a two-cell gap')
+    assert.equal(actions.columnGap, 2)
+  })
+}
+
+test('groupEntries keeps a worktree heading with its first group and gives mid-group rows a group of their own', () => {
+  const label = (e) => e.worktreeHeading !== undefined ? `wt:${e.worktreeHeading}` : e.heading === undefined ? e.index : `#${e.heading}`
+  const entries = listEntries(['r (2026-01-01)', 'a (2026-01-01, worktree: wa, tags: t)', 'b (2026-01-01, worktree: wa)'], ['t'], null)
+  assert.deepEqual(groupEntries(entries).map((g) => g.map(label)), [['wt:null', '#null', 0], ['wt:wa', '#t', 1], ['#null', 2]])
+  const tagged = listEntries(['a (2026-01-01, tags: t)', 'b (2026-01-01, tags: t)', 'c (2026-01-01)'], ['t'])
+  assert.deepEqual(groupEntries(tagged.slice(2)).map((g) => g.map(label)), [[1], ['#null', 2]], 'rows the window starts on mid-group')
+  assert.deepEqual(groupEntries([]), [])
 })
 
 test('a long list draws a window around the cursor with counts above and below', async () => {
@@ -265,7 +343,7 @@ test('the pane names its keys: a help line in each state', async () => {
   assert.ok(find(tree, (n) => n.type === 'Text' && n.dimColor === true && /Enter saves the note, empty Enter cancels, Esc returns to the prompt\./.test(n.children)))
 })
 
-import { arrange, colorOf, itemMeta, listEntries, windowOf } from '../../hooks/mod.js'
+import { arrange, colorOf, groupEntries, itemMeta, listEntries, windowOf } from '../../hooks/mod.js'
 import { PALETTE } from '../../hooks/store.js'
 
 const TAGGED3 = '# Todo\n\n- [x] old (2026-01-01, tags: build)\n- [ ] a (2026-01-02, tags: auth, build)\n- [ ] b (2026-01-03)\n- [ ] c (2026-01-04, tags: build)\n'
