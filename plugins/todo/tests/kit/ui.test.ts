@@ -45,13 +45,14 @@ const button = (ui: Mounted, key: string) => ui.find({ type: 'Button', key })
 const boxes = async (ui: Mounted, pred: (props: Record<string, unknown>) => boolean) => (await ui.findAll({ type: 'Box' })).some((box) => pred(box.props))
 const firstChild = async (ui: Mounted) => ((await ui.drawn()) as any).children[0].props.borderStyle
 
-// The engine's `$` has no `state` noun, so a test cannot write the view. A hook beneath the mod
-// stands in: once `gate.lapsed` is set, every read of the view carries a bandUntil in the past.
+// The engine's `$` has no `state` noun, so a test cannot write the view. This hook beneath the mod
+// stands for `$.state.set({ plugin: 'todo', key: 'view' }, { ...view, bandUntil: past })`: once
+// `gate.lapsed` is set, reads of the todo view (and no other key) carry a bandUntil in the past.
 function lapse(on: On) {
   const gate = { lapsed: false }
   on('state.get', async (_$, e, next) => {
     const read: any = await next(e)
-    if (!gate.lapsed || !read.value.value) return read
+    if (!gate.lapsed || e.plugin !== 'todo' || e.key !== 'view' || !read.value.value) return read
     return { value: { ...read.value, value: { ...read.value.value, bandUntil: 1 } } }
   })
   return gate
@@ -75,7 +76,9 @@ each('band shows the open count after an add, with a 10 s timer', async (surface
   // bandUntil lapses, but nothing invalidates the band yet: only the 10 s timer does.
   gate.lapsed = true
   expect((await ui.find(counts))?.text).toBe('Todo: 3 open')
-  await h.clock.advance(10_100)
+  await h.clock.advance(9_900)
+  expect((await ui.find(counts))?.text).toBe('Todo: 3 open')   // the timer is not due before 10 s
+  await h.clock.advance(200)
   expect(await ui.find(counts)).toBeUndefined()
   await ui.unmount()
 })
@@ -195,8 +198,10 @@ each('done on the last open item ends the review with a summary toast', async (s
   await ui.press({ key: 'done' })
   expect(h.closed).toEqual(['todo-review'])
   expect(h.toasts.at(-1)).toBe('Review: 2 done, 0 notes, 0 retagged')
-  // The engine's own ui.close chain ran the mod's closePane for that close: the summary was the third toast, not a fourth.
-  expect(h.toasts).toHaveLength(3)   // no second summary once the pane is gone
+  // The count is 3 because refreshPane sets pane: null before it closes and toasts the summary itself. The old
+  // case of closePane running on an already-gone pane (no second summary) is not exercised: under engine/kit
+  // 2.1.331 closePane never runs for the mod's own $.ui.close.
+  expect(h.toasts).toHaveLength(3)
   expect(await ui.keepsBeneath()).toBe(true)   // the pane is no longer the mod's to draw
   await ui.unmount()
 })
@@ -206,9 +211,10 @@ each('closing the pane shows the summary', async (surface, $, on) => {
   await ui.press({ key: 'done' })
   await ui.press({ key: 'close' })
   expect(h.closed).toEqual(['todo-review'])
-  // engine: the kit has no way to raise a person's ui.close ($.ui has no close), and the mod's own $.ui.close from
-  // the q button does not reach its own ui.close hook, so no summary is toasted and view.pane stays set (the old
-  // value, 'Review: 1 done, 0 notes, 0 retagged', is only reachable from a person's close). Mod defect on q.
+  // engine/kit 2.1.331: the kit has no way to raise a person's ui.close ($.ui has no close), and it does not run the
+  // plugin's own ui.close hook (closePane) for the mod's own $.ui.close from the q button, contrary to the declared
+  // "a $ call runs through every hook but the calling one". So no summary is toasted and view.pane stays set. Once the
+  // engine runs closePane here, flip this assertion to the summary toast 'Review: 1 done, 0 notes, 0 retagged'.
   expect(h.toasts).toEqual(['Done: alpha'])
   expect(await ui.keepsBeneath()).toBe(false)   // the pane is still the mod's: closePane never cleared it
   await ui.unmount()
@@ -338,8 +344,9 @@ each('t shows an input with the current tags and the known tags; submitting move
   expect(build).toBeUndefined()   // build group is gone
   expect(await button(ui, 'done')).toBeDefined()   // buttons are back
   await ui.press({ key: 'close' })
-  // engine: as in 'closing the pane shows the summary', q closes without the mod's closePane, so the old last toast,
-  // 'Review: 0 done, 0 notes, 1 retagged', is not raised: only the pane is closed.
+  // engine/kit 2.1.331: as in 'closing the pane shows the summary', the plugin's own ui.close hook does not run for q,
+  // so the old last toast is not raised. Once the engine runs closePane here, flip the toasts assertion below to
+  // include 'Review: 0 done, 0 notes, 1 retagged'.
   expect(h.closed).toEqual(['todo-review'])
   expect(h.toasts).toEqual(['Ignored tag: bad!', 'Tagged: c'])
   await ui.unmount()
