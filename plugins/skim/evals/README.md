@@ -12,8 +12,11 @@ through `tests/unit.sh` at the repository root.
 The suite is checked offline only, with `bash plugins/skim/tests/evals.sh`. That
 script runs each case's scaffold the way the runner does and pins the corpus
 anchors the graders depend on. It does not call Claude. The suite has not yet
-been run through `claude plugin eval`, so three things about the runner are
-assumed rather than known. The first run settles them.
+been run through `claude plugin eval`. The three questions below are the ones
+most likely to need a change. Everything else this README says about the runner
+is taken from its documentation
+(https://code.claude.com/docs/en/plugin-evals.md) and is likewise unobserved
+until a first run.
 
 The cheapest first run:
 
@@ -30,8 +33,11 @@ claude plugin eval plugins/skim --case retrieval --runs 1 --scaffold --trust-plu
    graders look for a line from the middle of a large file in the trace, which
    only works if the trace holds tool results and not just tool calls. Tell: add
    a temporary grader to `retrieval/graders/` with `type: regex`,
-   `target: trace` and `pattern: 'ratio: 0\.18'`, and check that it passes in a
-   run whose answer is correct. If not: replace each `no-bulk-*` grader with
+   `target: trace` and `pattern: '"type":\s*"tool_result"'`, and check that it
+   passes, which means the trace holds tool results at all. The pattern is not a
+   value from the corpus because a corpus value can also appear in the agent's
+   final answer, so it would pass even if tool results were missing from the
+   trace. If not: replace each `no-bulk-*` grader with
    `type: tool_used`, `tool: Read`, `min: 0`, `max: 0` and an `input_match` for
    unbounded reads of that file. That counts attempts, including ones the guard
    denied, so it marks the plugin down for reads whose content never arrived.
@@ -50,8 +56,9 @@ mise run eval:skim retrieval      # one case, by name or glob
 
 A full run is 40 agent runs on Sonnet (four cases, five runs each, two arms)
 plus the judge calls for the graders. The mise task caps it at $25 with
-`--max-cost-usd`, and passes `--scaffold`, `--trust-plugin`, `--no-publish` and
-`--threshold 0.8`. It calls the Claude API, so it is never part of
+`--max-cost-usd`, and passes `--scaffold`, `--trust-plugin`, `--no-publish`,
+`--threshold 0.8` and `--allow-tools Bash` (the skill's recipe runs `wc` and
+`grep`). It calls the Claude API, so it is never part of
 `mise run check` and never runs in CI.
 
 Results land in `plugins/skim/evals/results/<timestamp>/`, which is gitignored.
