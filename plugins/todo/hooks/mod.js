@@ -249,6 +249,22 @@ export function listEntries(items, order, here = null) {
   return entries
 }
 
+// Splits list entries into the groups the pane draws as one Box each. A heading opens a new group
+// unless the open one holds no item yet (a worktree heading over its first tag heading); rows a
+// window starts on mid-group form a group without a heading; headings a window ends on, cut off
+// from their rows, are dropped (the "more" count below already counts those rows). Exported for tests.
+export function groupEntries(entries) {
+  const hasItem = (group) => group.some((member) => member.item !== undefined)
+  const groups = []
+  for (const entry of entries) {
+    const opens = entry.item === undefined && groups.length > 0 && hasItem(groups.at(-1))
+    if (opens || groups.length === 0) groups.push([])
+    groups.at(-1).push(entry)
+  }
+  if (groups.length > 0 && !hasItem(groups.at(-1))) groups.pop()
+  return groups
+}
+
 // The slice of entries drawn around the cursor's entry, and how many items are left out each side.
 export function windowOf(entries, cursor, size = WINDOW) {
   const at = entries.findIndex((entry) => entry.index === cursor)
@@ -265,13 +281,22 @@ async function renderPane($, e, next) {
   const { Box, Text, Button, Input } = $.ui.resolve(e)
   const focused = e.props?.isFocused === true
   const narrow = (e.props?.bodyColumns ?? NARROW) < NARROW
+  // Desktop and the phones lay out in points and get room between blocks. Every other surface
+  // (the terminal and VS Code draw in character cells, where a step is whole blank rows and a
+  // percentage rounds up to whole cells, or one this code doesn't know) keeps its density, so the
+  // keys and help still fit.
+  const graphical = e.surface === 'desktop' || e.surface === 'mobile'
+  const cells = !graphical
+  const apart = cells ? 0 : 'md'
   const total = view.items.length
   const current = view.items[pane.index]
   const chips = (item) => store.itemTags(item).map((tag) => Text({ color: colorOf(tag, view.order), children: `#${tag}` }))
 
-  // The list: a header with the focus badge, then the rows around the cursor.
+  // The list: a header with the focus badge, then the rows around the cursor, one Box per group.
+  // Spacing uses step names: a graphical surface gives rows and groups room, the terminal draws
+  // `sm` as no row and `md` as one, so it keeps its density.
   const { shown, above, below } = windowOf(listEntries(view.items, view.order, view.here ?? null), pane.index)
-  const rows = shown.map((entry) => {
+  const row = (entry) => {
     if (entry.worktreeHeading !== undefined) {
       return Text({ bold: true, children: entry.worktreeHeading === null ? 'repo' : `worktree ${entry.worktreeHeading}` })
     }
@@ -282,18 +307,23 @@ async function renderPane($, e, next) {
     }
     const isCursor = entry.index === pane.index
     const mark = isCursor ? (focused ? '▶' : '▷') : ' '
+    // The focused cursor: a cell surface inverts the text; a graphical one draws the pointer and
+    // text in the accent color, as Claude Code marks a selected row, with no fill under the chips.
+    const highlight = isCursor && focused
+    const look = cells ? { inverse: highlight } : highlight ? { color: 'suggestion' } : {}
     return Box({ gap: 1, children: [
-      Text({ bold: isCursor, inverse: isCursor && focused, wrap: 'truncate', children: `${mark} ${entry.index + 1}. ${store.stripMeta(entry.item)}` }),
+      Text({ bold: isCursor, ...look, wrap: 'truncate', children: `${mark} ${entry.index + 1}. ${store.stripMeta(entry.item)}` }),
       ...chips(entry.item),
     ] })
-  })
+  }
+  const groups = groupEntries(shown)
   const list = Box({ flexDirection: 'column', borderStyle: 'single', paddingX: 1, ...(focused ? { borderColor: 'cyan' } : { borderDimColor: true }), children: [
-    Box({ gap: 2, children: [
-      Text({ bold: true, children: `Todo · ${total} open · ${pane.done} done · ${pane.index + 1}/${total}` }),
+    Box({ justifyContent: 'space-between', gap: 2, marginBottom: apart, children: [
+      Text({ bold: true, children: `Todo · ${total} open · ${pane.done} done` }),
       focused ? Text({ color: 'green', children: '● keys active' }) : Text({ dimColor: true, children: '○ not focused' }),
     ] }),
     ...(above > 0 ? [Text({ dimColor: true, children: `▲ ${above} more` })] : []),
-    ...rows,
+    Box({ flexDirection: 'column', gap: apart, children: groups.map((group) => Box({ flexDirection: 'column', rowGap: 'sm', children: group.map(row) })) }),
     ...(below > 0 ? [Text({ dimColor: true, children: `▼ ${below} more` })] : []),
   ] })
 
@@ -306,12 +336,16 @@ async function renderPane($, e, next) {
     : narrow
       ? [noteLine(notes.at(-1)), ...(notes.length > 1 ? [Text({ dimColor: true, children: `+${notes.length - 1} earlier` })] : [])]
       : notes.map(noteLine)
-  const card = Box({ flexDirection: 'column', borderStyle: 'round', paddingX: 1, ...(focused ? {} : { borderDimColor: true }), children: [
-    Text({ bold: true, wrap: 'wrap', children: store.stripMeta(current) }),
-    Text({ dimColor: true, children: [date && `added ${date}`, branch && `branch ${branch}`].filter(Boolean).join(' · ') || 'no metadata' }),
-    ...(store.itemTags(current).length > 0 ? [Box({ gap: 1, children: chips(current) })] : []),
-    Text({ bold: true, children: `Notes (${notes.length})` }),
-    ...noteRows,
+  const card = Box({ flexDirection: 'column', borderStyle: 'round', paddingX: 1, gap: apart, ...(focused ? {} : { borderDimColor: true }), children: [
+    Box({ flexDirection: 'column', rowGap: 'xs', children: [
+      Text({ bold: true, wrap: 'wrap', children: store.stripMeta(current) }),
+      Text({ dimColor: true, children: [date && `added ${date}`, branch && `branch ${branch}`].filter(Boolean).join(' · ') || 'no metadata' }),
+      ...(store.itemTags(current).length > 0 ? [Box({ gap: 1, children: chips(current) })] : []),
+    ] }),
+    Box({ flexDirection: 'column', rowGap: 'xs', children: [
+      Text({ bold: true, children: `Notes (${notes.length})` }),
+      ...noteRows,
+    ] }),
   ] })
 
   // Plain buttons draw as "d: done", the shape of Claude Code's own survey rows, so each key is visible.
@@ -329,21 +363,27 @@ async function renderPane($, e, next) {
     ]
     help = 'Enter replaces the tags, empty Enter clears them, Esc returns to the prompt.'
   } else {
-    const key = (name, label, hotkey, onPress, dim = false) => Button({ key: name, label, hotkey, plain: true, ...(dim || !focused ? { dimColor: true } : {}), onPress })
+    // Movement keys on one row, actions on the next. A wide desktop pane lines them up in equal
+    // columns; a cell surface, a phone or a narrow pane lets them flow, as a fixed fifth would clip there.
+    const columns = e.surface === 'desktop' && !narrow
+    const key = (name, label, hotkey, onPress, dim = false) => Box({ ...(columns ? { width: '20%' } : {}), children: [
+      Button({ key: name, label, hotkey, plain: true, ...(dim || !focused ? { dimColor: true } : {}), onPress }),
+    ] })
+    const keyRow = (children) => Box({ flexWrap: 'wrap', ...(columns ? {} : { columnGap: 2 }), children })
     controls = [
-      Box({ columnGap: 2, flexWrap: 'wrap', children: [
+      keyRow([
         key('down', 'down', 'j', () => move($, (i) => i + 1)),
         key('up', 'up', 'k', () => move($, (i) => i - 1)),
         key('top', 'top', 'g', () => move($, () => 0)),
         key('end', 'end', 'e', () => move($, (_, n) => n - 1)),
-      ] }),
-      Box({ columnGap: 2, flexWrap: 'wrap', children: [
+      ]),
+      keyRow([
         key('done', 'done', 'd', () => doneAction($)),
         key('undo', 'undo', 'u', () => undoAction($), pane.lastDone === null),
         key('note', 'note', 'n', () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, noteFor: v.items[v.pane.index] ?? null, draft: '' } }))),
         key('tags', 'tags', 't', () => setView($, (v) => ({ ...v, pane: v.pane && { ...v.pane, tagsFor: v.items[v.pane.index] ?? null, draft: store.itemTags(v.items[v.pane.index] ?? '').join(' ') } }))),
         key('close', 'close', 'q', () => $.ui.close({ id: PANE })),
-      ] }),
+      ]),
     ]
     help = focused
       ? 'Tab moves between keys, Enter presses, Esc returns to the prompt.'
@@ -351,7 +391,7 @@ async function renderPane($, e, next) {
   }
   return Box({ flexDirection: 'column', gap: 1, children: [
     ...(narrow ? [card, list] : [list, card]),
-    Box({ flexDirection: 'column', children: controls }),
+    Box({ flexDirection: 'column', rowGap: 'sm', children: controls }),
     Text({ dimColor: true, wrap: 'wrap', children: help }),
   ] })
 }

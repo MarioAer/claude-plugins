@@ -1,6 +1,6 @@
 {
   "name": "todo",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Capture deferred tasks mid-session into an untracked project todo list without interrupting the current task.",
   "types": "./types/index.d.ts",
   "author": {
