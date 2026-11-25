@@ -39,8 +39,17 @@ line() { sed -n "${2}p" "$WORK/$1"; }
 line_is() { [ "$(line "$1" "$2")" = "$3" ]; }
 line_has() { line "$1" "$2" | grep -Fq -- "$3"; }
 lines_in() { [ "$(wc -l <"$WORK/$1" | tr -d ' ')" = "$2" ]; }
-occurs_once() { [ "$(grep -Fc -- "$2" "$WORK/$1")" = 1 ]; }
 task_has() { grep -A6 '^\[tasks."eval:skim"\]' "$MISE" | grep -q -- "$1"; }
+
+# skip <what> records a SKIP, which is a failure when CI is set: a check that did not run proves nothing.
+skip() {
+  if [ -n "${CI-}" ]; then
+    FAIL=$((FAIL + 1))
+    printf '  FAIL %s (not available in CI)\n' "$1"
+  else
+    printf '  SKIP %s\n' "$1"
+  fi
+}
 
 # Per-case structure checks. Each takes a case directory.
 case_names() { find "$EVALS" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | grep -vE '^(lib|results)$' | sort | tr '\n' ' '; }
@@ -68,7 +77,7 @@ has_correctness_grader() {
   local g
   for g in "$1"/graders/*.md; do
     [ -e "$g" ] || continue
-    case "$(basename "$g")" in no-bulk-* | skill-fired.md) ;; *) return 0 ;; esac
+    case "$(basename "$g")" in no-bulk-* | no-key-access.md | skill-fired.md) ;; *) return 0 ;; esac
   done
   return 1
 }
@@ -108,10 +117,46 @@ ok "retry_policy.ts is 1483 lines" lines_in src/gateway/retry_policy.ts 1483
 ok "store.ts is 800 lines" lines_in src/session/store.ts 800
 ok "circuit_breaker.ts is 701 lines" lines_in src/gateway/circuit_breaker.ts 701
 
-# Sentinels: each occurs exactly once, far from the answer region
-ok "retry_policy.ts sentinel occurs once (line 479)" occurs_once src/gateway/retry_policy.ts 'Math.min(attempt, 60)'
-ok "store.ts sentinel occurs once (line 282)" occurs_once src/session/store.ts 'clock.now() - 321'
-ok "circuit_breaker.ts sentinel occurs once (line 306)" occurs_once src/gateway/circuit_breaker.ts 'scaled * 29,'
+# Bulk-read graders: each pattern is three unrelated lines of one file at once (a conjunction), run here
+# with the runner's regex dialect (JavaScript, through Bun). It must match the whole file, and must not
+# match what a targeted grep or a bounded read of the answer region puts in the trace. The regions are the
+# answer key's functions (a doc comment and about 16 lines each); the helper widens them by 40 lines.
+GUARDED=(
+  "no-bulk-retry-policy.md src/gateway/retry_policy.ts 690-703"
+  "no-bulk-store.md src/session/store.ts 71-91 182-202 373-393 596-616 707-727"
+  "no-bulk-circuit-breaker.md src/gateway/circuit_breaker.ts 688-694"
+)
+all_guarded() {
+  local g entry
+  for g in "$EVALS"/*/graders/no-bulk-*.md; do
+    for entry in "${GUARDED[@]}"; do
+      [ "${entry%% *}" = "$(basename "$g")" ] && continue 2
+    done
+    return 1
+  done
+}
+ok "every no-bulk grader is pinned below" all_guarded
+if command -v bun >/dev/null 2>&1; then
+  for entry in "${GUARDED[@]}"; do
+    read -ra parts <<<"$entry"
+    out=$(bun "$ROOT/tests/grader-check.mjs" "$EVALS/cross-file/graders/${parts[0]}" "$WORK/${parts[1]}" "${parts[@]:2}" 2>&1)
+    passed_here=$(grep -c '^PASS ' <<<"$out")
+    failed_here=$(grep -c '^FAIL ' <<<"$out")
+    PASS=$((PASS + passed_here))
+    FAIL=$((FAIL + failed_here))
+    if [ "$failed_here" -eq 0 ] && [ "$passed_here" -gt 0 ]; then
+      printf '  PASS %s: %s checks (whole file matches; no family grep or answer region does)\n' "${parts[0]}" "$passed_here"
+    else
+      if [ "$failed_here" -eq 0 ]; then
+        FAIL=$((FAIL + 1))
+        out="FAIL grader-check.mjs printed no results: $out"
+      fi
+      sed -n 's/^FAIL /  FAIL '"${parts[0]}"': /p' <<<"$out"
+    fi
+  done
+else
+  skip "no-bulk grader pins: bun not on PATH"
+fi
 
 # The documented command always scaffolds and always caps cost
 ok "eval:skim passes --scaffold" task_has '--scaffold'
@@ -119,8 +164,9 @@ ok "eval:skim passes --max-cost-usd" task_has '--max-cost-usd'
 
 # Case structure
 ok "exactly four cases" test "$(case_names)" = "comprehension cross-file dense-file retrieval "
-for case_dir in "$EVALS"/retrieval "$EVALS"/comprehension "$EVALS"/dense-file "$EVALS"/cross-file; do
-  name=$(basename "$case_dir")
+read -ra case_list <<<"$(case_names)"
+for name in "${case_list[@]}"; do
+  case_dir="$EVALS/$name"
   ok "$name: prompt.md and case.yaml carry the case name" names_match "$case_dir" "$name"
   ok "$name: case.yaml uses fixture.sh as scaffold" file_has_line "$case_dir/case.yaml" "  scaffold_script: fixture.sh"
   ok "$name: fixture.sh is the shared executable scaffold" fixture_shared "$case_dir"
@@ -130,11 +176,12 @@ for case_dir in "$EVALS"/retrieval "$EVALS"/comprehension "$EVALS"/dense-file "$
   ok "$name: has a correctness grader" has_correctness_grader "$case_dir"
   ok "$name: has a bulk-read grader" has_grader "$case_dir" 'no-bulk-*.md'
   ok "$name: has a skill-fired grader" has_grader "$case_dir" 'skill-fired.md'
+  ok "$name: has a no-key-access grader" has_grader "$case_dir" 'no-key-access.md'
   ok "$name: prompt names none of the behaviours under test" prompt_neutral "$case_dir"
 done
 
 # Graders that share a name across cases must stay identical
-for shared in skill-fired.md no-bulk-retry-policy.md no-bulk-store.md; do
+for shared in skill-fired.md no-key-access.md no-bulk-retry-policy.md no-bulk-store.md; do
   ok "$shared is identical in every case that has it" graders_shared "$shared"
 done
 

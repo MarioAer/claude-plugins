@@ -104,12 +104,12 @@ export function host(on: On, options: HostOptions = {}): Host {
       const blocks = [main, ...(git.worktrees ?? [])].map((path) => `worktree ${path}\nHEAD 0\nbranch refs/heads/${base(path)}`)
       return ran(0, `${blocks.join('\n\n')}\n`)
     }
-    if (argv[0] === 'mkdir') {
+    if (argv[0] === 'mkdir' && argv.length === 2) {
       if (locks.has(argv[1])) return ran(1, '', 'File exists')
       locks.set(argv[1], Date.now())
       return ran(0)
     }
-    if (argv[0] === 'rmdir') {
+    if (argv[0] === 'rmdir' && argv.length === 2) {
       return locks.delete(argv[1]) ? ran(0) : ran(1, '', 'No such file or directory')
     }
     return next(e)
