@@ -30,6 +30,7 @@ export type HostOptions = {
 }
 export type Host = {
   files: Map<string, string>
+  links: Set<string>   // paths that stat as symlinks; a test adds one mid-run to turn a path into a link
   toasts: string[]
   opened: { id: string }[]
   closed: string[]
@@ -57,7 +58,7 @@ export function host(on: On, options: HostOptions = {}): Host {
   const links = new Set(options.links ?? [])
   const files = new Map<string, string>(Object.entries(options.files ?? {}))
   const locks = new Map<string, number>()   // lock path → when mkdir took it, as store.js reads it: Date.now()
-  const h: Host = { files, toasts: [], opened: [], closed: [], registered: [], reachedCore: [], clock: mock.clock(on) }
+  const h: Host = { files, links, toasts: [], opened: [], closed: [], registered: [], reachedCore: [], clock: mock.clock(on) }
 
   const main = git ? git.main ?? git.top : ROOT
   // The HEAD file `git rev-parse --git-path HEAD` names: the main checkout's, or a linked worktree's.
