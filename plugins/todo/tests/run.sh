@@ -243,11 +243,19 @@ fi
 
 echo "$passed passed, $failed failed"
 
-# The mod's tests run under Bun (its node:test support); the shell checks above do not need it.
+# Bun runs the store and pure tests (its node:test support); the shell checks above do not need it.
 echo
 if command -v bun >/dev/null 2>&1; then
   bun test "$ROOT/tests/mod/" || failed=$((failed + 1))
 else
   echo "SKIP mod tests: bun not on PATH"
+fi
+
+# The hook-driven tests run on the engine's own kit (tests/kit/*.test.ts).
+echo
+if command -v claude >/dev/null 2>&1 && claude plugin test --help >/dev/null 2>&1; then
+  claude plugin test "$ROOT" || failed=$((failed + 1))
+else
+  echo "SKIP kit tests: claude plugin test not available"
 fi
 [ "$failed" -eq 0 ]
