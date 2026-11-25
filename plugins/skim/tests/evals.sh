@@ -52,7 +52,14 @@ skip() {
 }
 
 # Per-case structure checks. Each takes a case directory.
-case_names() { find "$EVALS" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | grep -vE '^(lib|results)$' | sort | tr '\n' ' '; }
+# A case is a directory directly under evals/ that holds prompt.md or case.yaml, which is how the runner finds
+# cases. Leftovers such as an old corpus/ or a hidden directory do not count.
+case_names() {
+  local d
+  for d in "$EVALS"/*/; do
+    { [ -f "${d}prompt.md" ] || [ -f "${d}case.yaml" ]; } && basename "$d"
+  done | sort | tr '\n' ' '
+}
 file_has_line() { grep -Fxq -- "$2" "$1"; }
 prompt_body() { awk 'f>=2{print} /^---$/{f++}' "$1/prompt.md"; }
 names_match() { file_has_line "$1/prompt.md" "name: $2" && file_has_line "$1/case.yaml" "name: $2"; }
@@ -117,6 +124,24 @@ ok "retry_policy.ts is 1483 lines" lines_in src/gateway/retry_policy.ts 1483
 ok "store.ts is 800 lines" lines_in src/session/store.ts 800
 ok "circuit_breaker.ts is 701 lines" lines_in src/gateway/circuit_breaker.ts 701
 
+# no-key-access: its pattern must match every path that holds the answer key or shows where it is. The
+# offline tests, docs/benchmark.md and the README ship in the plugin but sit outside evals/, so the runner's
+# isolation does not cover them and this grader is the only guard.
+KEY_PATTERN=$(sed -n "s/^pattern: '\(.*\)'$/\1/p" "$EVALS/retrieval/graders/no-key-access.md")
+key_paths=(tests/evals.sh tests/grader-check.mjs tests/score-check.mjs docs/benchmark.md evals/README.md evals/lib/gen-corpus.sh evals/lib/gen-crossfile.sh)
+for g in "$EVALS"/*/graders/*.md; do key_paths+=("${g#"$ROOT"/}"); done
+key_missed=""
+for p in "${key_paths[@]}"; do
+  printf '%s\n' "$p" | grep -Eq -- "$KEY_PATTERN" || key_missed="$key_missed $p"
+done
+if [ -n "$KEY_PATTERN" ] && [ -z "$key_missed" ]; then
+  PASS=$((PASS + 1))
+  printf '  PASS no-key-access matches all %s answer-key paths\n' "${#key_paths[@]}"
+else
+  FAIL=$((FAIL + 1))
+  printf '  FAIL no-key-access pattern misses:%s\n' "${key_missed:- (no pattern found)}"
+fi
+
 # Bulk-read graders: each pattern is three unrelated lines of one file at once (a conjunction), run here
 # with the runner's regex dialect (JavaScript, through Bun). It must match the whole file, and must not
 # match what a targeted grep or a bounded read of the answer region puts in the trace. The regions are the
@@ -156,6 +181,35 @@ if command -v bun >/dev/null 2>&1; then
   done
 else
   skip "no-bulk grader pins: bun not on PATH"
+fi
+
+# Scores: one failed grader must not pass the threshold the mise task passes to the runner. A guard grader
+# with the default weight would let a case with four other graders score 4/5 = 0.8 and pass.
+THRESHOLD=$(grep -A6 '^\[tasks."eval:skim"\]' "$MISE" | sed -n 's/.*--threshold \([0-9.]*\).*/\1/p' | head -n 1)
+if [ -z "$THRESHOLD" ]; then
+  FAIL=$((FAIL + 1))
+  echo "  FAIL no --threshold on the eval:skim task in mise.toml"
+elif command -v bun >/dev/null 2>&1; then
+  for case_dir in "$EVALS"/*/; do
+    [ -d "${case_dir}graders" ] || continue
+    out=$(bun "$ROOT/tests/score-check.mjs" "$case_dir" "$THRESHOLD" 2>&1)
+    passed_here=$(grep -c '^PASS ' <<<"$out")
+    failed_here=$(grep -c '^FAIL ' <<<"$out")
+    PASS=$((PASS + passed_here))
+    FAIL=$((FAIL + failed_here))
+    name=$(basename "$case_dir")
+    if [ "$failed_here" -eq 0 ] && [ "$passed_here" -gt 0 ]; then
+      printf '  PASS %s scores: %s checks (one failed grader stays below %s; no-key-access does not move it)\n' "$name" "$passed_here" "$THRESHOLD"
+    else
+      if [ "$failed_here" -eq 0 ]; then
+        FAIL=$((FAIL + 1))
+        out="FAIL score-check.mjs printed no results: $out"
+      fi
+      sed -n 's/^FAIL /  FAIL '"$name"' scores: /p' <<<"$out"
+    fi
+  done
+else
+  skip "case score checks: bun not on PATH"
 fi
 
 # The documented command always scaffolds and always caps cost

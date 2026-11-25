@@ -2,5 +2,6 @@
 type: regex
 target: trace
 match: not_contains
-pattern: 'graders/|gen-corpus|gen-crossfile|evals/lib'
+weight: 0.01
+pattern: 'graders/|gen-corpus|gen-crossfile|grader-check|score-check|evals/lib|evals/README|tests/evals|docs/benchmark'
 ---

@@ -19,7 +19,7 @@ const lines = text.replace(/\n$/, '').split('\n')
 const filters = [
   'Math\\.min', 'Math\\.pow', 'Math\\.max', 'clock\\.now', 'cache\\.set', 'cache\\.get', 'withLock',
   '^export', 'function ', 'attempt', 'exponent', 'scaled', 'consecutive', 'stamp', 'this\\.',
-  '^\\s*(/\\*\\*|\\*)',
+  '^\\s*(/\\*\\*|\\*)', '[Tt]hreshold', '[Rr]ecovery', 'return', 'failures', 'state',
 ]
 const widen = 40
 

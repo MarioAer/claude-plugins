@@ -215,6 +215,7 @@ each('closing the pane shows the summary', async (surface, $, on) => {
   // plugin's own ui.close hook (closePane) for the mod's own $.ui.close from the q button, contrary to the declared
   // "a $ call runs through every hook but the calling one". So no summary is toasted and view.pane stays set. Once the
   // engine runs closePane here, flip this assertion to the summary toast 'Review: 1 done, 0 notes, 0 retagged'.
+  // closePane itself is covered in tests/mod/close.test.mjs.
   expect(h.toasts).toEqual(['Done: alpha'])
   expect(await ui.keepsBeneath()).toBe(false)   // the pane is still the mod's: closePane never cleared it
   await ui.unmount()
@@ -347,6 +348,7 @@ each('t shows an input with the current tags and the known tags; submitting move
   // engine/kit 2.1.331: as in 'closing the pane shows the summary', the plugin's own ui.close hook does not run for q,
   // so the old last toast is not raised. Once the engine runs closePane here, flip the toasts assertion below to
   // include 'Review: 0 done, 0 notes, 1 retagged'.
+  // closePane itself is covered in tests/mod/close.test.mjs.
   expect(h.closed).toEqual(['todo-review'])
   expect(h.toasts).toEqual(['Ignored tag: bad!', 'Tagged: c'])
   await ui.unmount()

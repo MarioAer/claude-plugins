@@ -11,8 +11,9 @@ through `tests/unit.sh` at the repository root.
 
 The suite is checked offline only, with `bash plugins/skim/tests/evals.sh`. That
 script runs each case's scaffold the way the runner does, pins the corpus
-anchors the graders depend on, and runs the `no-bulk-*` patterns against the
-corpus. It does not call Claude. The suite has not yet been run through
+anchors the graders depend on, runs the `no-bulk-*` patterns against the
+corpus, and checks how each case's graders add up against the `--threshold`.
+It does not call Claude. The suite has not yet been run through
 `claude plugin eval`. The four questions below are the ones most likely to need
 a change. Everything else this README says about the runner is taken from its
 documentation (https://code.claude.com/docs/en/plugin-evals.md) and is likewise
@@ -58,9 +59,15 @@ claude plugin eval plugins/skim --case retrieval --runs 1 --scaffold --trust-plu
 4. **Does the agent reach the answer keys?** The with-plugin arm loads
    `plugins/skim`, which contains `evals/*/graders`. The runner's documentation
    says it keeps the eval directory out of the agent's reach. That is the
-   documentation's statement and is unobserved. Tell: `no-key-access` fails in a
-   run. If so: that run is void, as the hand-run benchmark's contaminated arm
-   was. Do not use its figures.
+   documentation's statement and is unobserved, and it covers only `evals/`. The
+   plugin also ships files that hold the key or point at it from outside
+   `evals/`: `tests/evals.sh` (its checks name the answer lines and the five
+   functions), `tests/grader-check.mjs`, `tests/score-check.mjs` and
+   `docs/benchmark.md`. The runner's isolation does not cover those, so only
+   `no-key-access` guards them; `tests/evals.sh` checks that its pattern matches
+   each of these paths. Tell: `no-key-access` fails in a run. If so: that run is
+   void, as the hand-run benchmark's contaminated arm was. Do not use its
+   figures.
 
 ## Running it
 
@@ -124,8 +131,10 @@ Each case has four kinds of grader.
 - **`no-bulk-*`.** One per large file the case touches. Each is a regex over the
   run's trace that fails if three unrelated lines from the middle of that file
   appear together: a body line, a doc-comment line and a line of another kind
-  (a call or a function signature), from three different declarations, all far
-  from the answer.
+  (a call, or the doc comment of a second family), from three different
+  declarations, all far from the answer. The third line is never a function
+  signature: the skill's own outline grep returns signatures, and a grep for a
+  property word such as `threshold` would then return two of the three.
   One line alone is not enough. Each file is mostly generated families, so a
   single line is one of dozens of similar ones and a `grep` for the property
   (`Math.min`, `clock.now()`, `exponent`) returns it, which is the move the
@@ -138,8 +147,13 @@ Each case has four kinds of grader.
   corpus: it must match the whole file and must not match the output of a family
   of targeted greps or the answer region widened by 40 lines.
 - **`no-key-access`.** Fails if the trace names `graders/`, `gen-corpus`,
-  `gen-crossfile` or `evals/lib`, which means the agent reached the answer keys
-  or the generators.
+  `gen-crossfile`, `grader-check`, `score-check`, `evals/lib`, `evals/README`,
+  `tests/evals` or `docs/benchmark`. That covers the graders, the generators,
+  this README, the offline tests and `docs/benchmark.md`. The last ones matter
+  because they sit outside `evals/`, so the runner's documented isolation does
+  not cover them, yet `tests/evals.sh` quotes the answer lines and the five
+  functions and `docs/benchmark.md` describes the planted defects. A trace that
+  names any of them means the agent reached the answer keys or the generators.
 - **`skill-fired`.** Passes if the `reading-large-files` skill was invoked. The
   runner leaves it out of the score in two-arm runs, so it only reports whether
   the skill triggered.
@@ -169,7 +183,11 @@ marking them down.
 ## Scoring
 
 First check that `no-key-access` passed in every run before reading any score. A
-run that failed it is void.
+run that failed it is void. `no-key-access` carries a weight of 0.01 because it is
+a validity gate and not part of the grade: a run where it fails is void whatever
+its score, and a full weight would let one other failed grader still reach the
+0.8 threshold. `tests/evals.sh` checks the weights against the task's
+`--threshold`.
 
 Record three things per repetition. Token counts alone are not sufficient.
 
