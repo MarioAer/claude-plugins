@@ -1,4 +1,5 @@
-plugins/skim/evals/corpus/
+plugins/skim/evals/results/
+plugins/skim/evals/lib/corpus/
 
 # Written by Claude Code when a plugin is loaded with --plugin-dir (mod type declarations)
 plugins/*/tsconfig.json
