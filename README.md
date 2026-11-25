@@ -58,7 +58,7 @@ mise run setup    # installs the pinned tools (mise.lock) and a git pre-commit h
 | `mise run check` | Everything CI runs: `lint`, `validate` and `test`. |
 | `mise run lint` | ShellCheck and an shfmt check over every shell script (`mise run fmt` rewrites them; style in `.editorconfig`). |
 | `mise run validate` | `tests/validate.sh`: structural tests over the marketplace and every plugin: manifests, names, frontmatter, hooks, README, licenses, `claude plugin validate --strict`. |
-| `mise run test` | `tests/unit.sh`: runs every `plugins/<name>/tests/run.sh`. |
+| `mise run test` | `tests/unit.sh`: runs every `plugins/<name>/tests/run.sh`. For a mod that is store and pure functions under Bun in `tests/mod/`, hooks and UI on the engine's kit in `tests/kit/`. |
 | `mise run test:e2e <plugin> [scenario…]` | Headless behavioral scenarios for one plugin (where present). Calls the Claude API; not run in CI. |
 | `mise run eval:skim [case]` | skim's eval suite, with and without the plugin. Calls the Claude API; not run in CI. |
 | `mise run bump <plugin> <patch\|minor\|major>` | Raises the plugin's `version`. |
