@@ -31,6 +31,7 @@ export type HostOptions = {
 export type Host = {
   files: Map<string, string>
   links: Set<string>   // paths that stat as symlinks; a test adds one mid-run to turn a path into a link
+  surfaces: string[]   // what session.surfaces answers; a test empties it mid-run to make the session headless
   toasts: string[]
   opened: { id: string }[]
   closed: string[]
@@ -53,12 +54,13 @@ const EMPTY: Record<string, (e: any) => unknown> = {
 }
 
 export function host(on: On, options: HostOptions = {}): Host {
-  const { cwd = ROOT, surfaces = ['terminal'], toolCheck = 'allow', refuseRegister = false, core = {} } = options
+  const { cwd = ROOT, toolCheck = 'allow', refuseRegister = false, core = {} } = options
   const git = options.git === undefined ? { top: ROOT } : options.git
   const links = new Set(options.links ?? [])
+  const surfaces: string[] = [...(options.surfaces ?? ['terminal'])]
   const files = new Map<string, string>(Object.entries(options.files ?? {}))
   const locks = new Map<string, number>()   // lock path → when mkdir took it, as store.js reads it: Date.now()
-  const h: Host = { files, links, toasts: [], opened: [], closed: [], registered: [], reachedCore: [], clock: mock.clock(on) }
+  const h: Host = { files, links, surfaces, toasts: [], opened: [], closed: [], registered: [], reachedCore: [], clock: mock.clock(on) }
 
   const main = git ? git.main ?? git.top : ROOT
   // The HEAD file `git rev-parse --git-path HEAD` names: the main checkout's, or a linked worktree's.
