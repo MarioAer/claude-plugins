@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Mounted, TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { host, typed, todoFile } from './host'
+import type { HostOptions } from './host'
 
 const SURFACES = ['terminal', 'desktop'] as const
 const BAND = { plugin: 'todo', component: 'AbovePrompt', props: {} } as const
@@ -12,6 +13,8 @@ const PANE = {
 const CAPTURE = { ...PANE, requestId: 'todo-capture' } as const
 
 type Surface = (typeof SURFACES)[number]
+// Every surface the host can answer; the spacing tests below name theirs.
+type Named = NonNullable<HostOptions['surfaces']>[number]
 type Body = (surface: Surface, ...kit: Parameters<TestBody>) => unknown
 // One test per surface: a test registers its hooks before its first call on `$`, so a body cannot loop over surfaces.
 const each = (title: string, body: Body) => {
@@ -29,7 +32,7 @@ const prompt = (text: string) => ({ text, wait: false, origin: { kind: 'composer
 const counts = { type: 'Text', text: /^Todo:/ } as const
 
 // A host holding `file` on `surface`, the review opened, and the Pane mounted.
-async function review(surface: Surface, $: Parameters<TestBody>[0], on: On, file = TWO) {
+async function review(surface: Named, $: Parameters<TestBody>[0], on: On, file = TWO) {
   const h = host(on, { surfaces: [surface], files: { [todoFile()]: file } })
   await $.command.run(typed('review'))
   const ui = await $.ui.mount({ ...PANE, surface })
@@ -44,6 +47,27 @@ async function cursor(ui: Mounted) {
 const button = (ui: Mounted, key: string) => ui.find({ type: 'Button', key })
 const boxes = async (ui: Mounted, pred: (props: Record<string, unknown>) => boolean) => (await ui.findAll({ type: 'Box' })).some((box) => pred(box.props))
 const firstChild = async (ui: Mounted) => ((await ui.drawn()) as any).children[0].props.borderStyle
+
+// What `ui.drawn()` returns: the mod's tree with each element as { type, props, children }, a Text's
+// children the array of its strings, a Button also carrying `press`. Props sit under `props`, which the
+// engine leaves out of an element that has none: `normal` puts an empty one back.
+type Node = { type: string; props: Record<string, any>; children?: (Node | string)[] }
+const kids = (node: Node) => (node.children ?? []).filter((child): child is Node => typeof child === 'object')
+const textOf = (node: Node) => (node.children ?? []).join('')
+// Depth-first search for the first element matching pred.
+function walk(node: Node, pred: (node: Node) => boolean): Node | undefined {
+  if (pred(node)) return node
+  for (const child of kids(node)) {
+    const hit = walk(child, pred)
+    if (hit) return hit
+  }
+  return undefined
+}
+// The Box that directly holds an element matching pred.
+const parentOf = (tree: Node, pred: (node: Node) => boolean) => walk(tree, (node) => node.type === 'Box' && kids(node).some(pred))
+const cursorRow = (tree: Node) => parentOf(tree, (node) => node.type === 'Text' && /^[▶▷] /.test(textOf(node)))!
+const normal = (node: Node): Node => ({ ...node, props: node.props ?? {}, children: node.children?.map((child) => (typeof child === 'object' ? normal(child) : child)) })
+const drawn = async (ui: Mounted) => normal((await ui.drawn()) as Node)
 
 // The engine's `$` has no `state` noun, so a test cannot write the view. This hook beneath the mod
 // stands for `$.state.set({ plugin: 'todo', key: 'view' }, { ...view, bandUntil: past })`: once
@@ -133,17 +157,35 @@ each('review with no items answers the empty line; headless review passes to cor
 each('focus is visible: accent border, inverse cursor and a badge; unfocused dims and says how to focus', async (surface, $, on) => {
   const { ui } = await review(surface, $, on)
   expect(await boxes(ui, (p) => p.borderStyle === 'single' && p.borderColor === 'cyan')).toBe(true)
-  expect((await ui.find({ type: 'Text', text: '▶ 1. alpha' }))?.props.inverse).toBe(true)
+  const focused = await ui.find({ type: 'Text', text: '▶ 1. alpha' })
+  if (surface === 'terminal') expect(focused?.props.inverse, 'a cell surface keeps the inverse bar').toBe(true)
+  // A graphical surface marks the cursor with the accent colour instead (see the graphical surface test below).
+  else expect(focused?.props.color, 'a graphical surface draws the cursor in the accent colour').toBe('suggestion')
+  expect(cursorRow(await drawn(ui)).props.backgroundColor, 'no Box fill under the cursor').toBeUndefined()
   expect(await texts(ui)).toContain('● keys active')
   expect((await button(ui, 'done'))?.props.dimColor).toBeUndefined()
   await ui.redraw({ ...PANE.props, isFocused: false })
   expect(await boxes(ui, (p) => p.borderStyle === 'single' && p.borderDimColor === true && p.borderColor === undefined)).toBe(true)
-  expect((await ui.find({ type: 'Text', text: '▷ 1. alpha' }))?.props.inverse).toBe(false)
+  expect((await ui.find({ type: 'Text', text: '▷ 1. alpha' }))?.props.inverse).not.toBe(true)
+  expect(cursorRow(await drawn(ui)).props.backgroundColor, 'no fill while unfocused').toBeUndefined()
   expect(await texts(ui)).toContain('○ not focused')
   expect(await texts(ui)).toContain('ctrl+x tab to focus · keys go to the prompt')
   expect((await button(ui, 'done'))?.props.dimColor).toBe(true)
   await ui.unmount()
 })
+
+for (const surface of ['desktop', 'mobile'] as const) {
+  test(`a graphical surface marks the focused cursor with the accent color, as Claude Code marks a selected row [${surface}]`, async ($, on) => {
+    const { ui } = await review(surface, $, on)
+    const text = await ui.find({ type: 'Text', text: '▶ 1. alpha' })
+    expect(text?.props.color, `${surface}: accent pointer and text`).toBe('suggestion')
+    expect(text?.props.inverse).not.toBe(true)
+    expect(cursorRow(await drawn(ui)).props.backgroundColor, `${surface}: no fill under the colored tag chips`).toBeUndefined()
+    await ui.redraw({ ...PANE.props, isFocused: false })
+    expect((await ui.find({ type: 'Text', text: '▷ 1. alpha' }))?.props.color, 'no accent while unfocused').toBeUndefined()
+    await ui.unmount()
+  })
+}
 
 each('j and k move one row and stop at the ends; g and e jump to the first and last', async (surface, $, on) => {
   const { h, ui } = await review(surface, $, on, FIVE)
@@ -159,7 +201,83 @@ each('j and k move one row and stop at the ends; g and e jump to the first and l
   expect(h.closed).toEqual([])            // reaching the end never closes the pane
   await ui.press({ key: 'top' })
   expect(await cursor(ui)).toBe('1. a')
-  expect((await texts(ui)).some((t) => t.startsWith('Todo · 5 open · 0 done · 1/5'))).toBe(true)
+  expect(await texts(ui), 'the header drops the n/total position').toContain('Todo · 5 open · 0 done')
+  await ui.unmount()
+})
+
+// The spacing the pane asks for: the header's bottom margin, the gap between groups and inside
+// the card, the rows' gap inside a group, and each key cell's width.
+const MOVES = ['down', 'up', 'top', 'end']
+const ACTIONS = ['done', 'undo', 'note', 'tags', 'close']
+async function spacing(surface: Named, $: Parameters<TestBody>[0], on: On, bodyColumns: number | undefined = 80) {
+  const { ui } = await review(surface, $, on, TAGGED3)
+  // Redraw with the width asked for, so an undefined bodyColumns really reaches the mod undefined.
+  await ui.redraw({ ...PANE.props, bodyColumns })
+  const tree = await drawn(ui)
+  const header = parentOf(tree, (n) => n.type === 'Text' && textOf(n) === 'Todo · 3 open · 0 done')!
+  const group = parentOf(tree, (n) => n.type === 'Text' && textOf(n) === '#build' && n.props.bold === true)!
+  const groups = parentOf(tree, (n) => n === group)!
+  const card = walk(tree, (n) => n.type === 'Box' && n.props.borderStyle === 'round')!
+  const cells = [...MOVES, ...ACTIONS].map((key) => parentOf(tree, (n) => n.type === 'Button' && n.props.key === key)!)
+  const moves = parentOf(tree, (n) => n === cells[0])!
+  const actions = parentOf(tree, (n) => n === cells[MOVES.length])!
+  await ui.unmount()
+  return { tree, header, group, groups, card, cells, moves, actions }
+}
+
+test('the pane spaces its rows on a graphical surface: groups apart, rows a step apart, header split, card in two blocks, keys in columns', async ($, on) => {
+  const { tree, header, group, groups, card, cells, moves, actions } = await spacing('desktop', $, on)
+  expect(header.props.justifyContent, 'title left, focus badge right').toBe('space-between')
+  expect(header.props.marginBottom).toBe('md')
+  expect(group.props.rowGap, 'rows inside a group sit a step apart').toBe('sm')
+  expect(kids(group).includes(cursorRow(tree)), 'the group holds its rows').toBe(true)
+  expect(groups.props.gap, 'groups sit further apart than rows').toBe('md')
+  expect(kids(groups).length, 'one Box per group: #build, #auth and untagged').toBe(3)
+  expect(card.props.gap, 'the title block and the notes block sit apart').toBe('md')
+  expect(kids(card).length).toBe(2)
+  for (const cell of cells) expect(cell.props.width, 'equal key columns, lined up across both rows').toBe('20%')
+  expect(kids(moves).length, 'movement keys have a row of their own').toBe(MOVES.length)
+  expect(kids(actions).length, 'action keys have a row of their own').toBe(ACTIONS.length)
+  expect(moves).not.toBe(actions)
+})
+
+test('a narrow graphical pane lets the keys flow instead of fixed columns', async ($, on) => {
+  const { cells, moves } = await spacing('desktop', $, on, 40)
+  for (const cell of cells) expect(cell.props.width).toBeUndefined()
+  expect(moves.props.columnGap).toBe(2)
+})
+
+for (const bodyColumns of [undefined, 80]) {
+  test(`a phone gets the graphical spacing but lets the keys flow, whatever width it reports [bodyColumns ${bodyColumns}]`, async ($, on) => {
+    const { header, groups, card, cells, moves, actions } = await spacing('mobile', $, on, bodyColumns)
+    expect(header.props.marginBottom).toBe('md')
+    expect(groups.props.gap).toBe('md')
+    expect(card.props.gap).toBe('md')
+    for (const cell of cells) expect(cell.props.width, `bodyColumns ${bodyColumns}: no fixed fifths on a phone`).toBeUndefined()
+    expect(moves.props.columnGap).toBe(2)
+    expect(actions.props.columnGap).toBe(2)
+  })
+}
+
+for (const surface of ['terminal', 'vscode'] as const) {
+  test(`${surface} keeps its density: no blank rows between header, groups or card blocks`, async ($, on) => {
+    const { header, groups, card, cells, moves, actions } = await spacing(surface, $, on)
+    expect(header.props.marginBottom).toBe(0)
+    expect(groups.props.gap).toBe(0)
+    expect(card.props.gap).toBe(0)
+    expect(kids(groups).length, 'still one Box per group').toBe(3)
+    for (const cell of cells) expect(cell.props.width, 'a percentage rounds up to whole cells and wraps a third row').toBeUndefined()
+    expect(moves.props.columnGap, 'keys flow with a two-cell gap').toBe(2)
+    expect(actions.props.columnGap).toBe(2)
+  })
+}
+
+test('the pane never draws a heading with no rows under it at the window edge', async ($, on) => {
+  // 10-entry window: #t and its 8 rows, then the untagged heading as the 10th entry, its row cut off.
+  const many = '# Todo\n\n' + Array.from({ length: 8 }, (_, i) => `- [ ] t${i + 1} (2026-01-01, tags: t)\n`).join('') + '- [ ] plain (2026-01-01)\n'
+  const { ui } = await review('terminal', $, on, many)
+  expect(await texts(ui), 'the cut-off heading is not drawn').not.toContain('untagged')
+  expect(await texts(ui)).toContain('▼ 1 more')
   await ui.unmount()
 })
 

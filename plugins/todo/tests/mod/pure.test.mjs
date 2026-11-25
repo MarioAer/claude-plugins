@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { replyFor, contextFor, tagSuggestions, arrange, colorOf, itemMeta, listEntries, windowOf } from '../../hooks/mod.js'
+import { replyFor, contextFor, tagSuggestions, arrange, colorOf, itemMeta, listEntries, groupEntries, windowOf } from '../../hooks/mod.js'
 import { PALETTE } from '../../hooks/store.js'
 
 test('replyFor maps markers to the three replies', () => {
@@ -53,4 +53,21 @@ test('listEntries adds worktree headings in the main checkout only', () => {
   const label = (e) => e.worktreeHeading !== undefined ? `wt:${e.worktreeHeading}` : e.heading === undefined ? e.index : `#${e.heading}`
   assert.deepEqual(listEntries(items, [], null).map(label), ['wt:null', '#null', 0, 'wt:wa', '#null', 1])
   assert.deepEqual(listEntries(['a (2026-01-01, worktree: wa)', 'r (2026-01-01)'], [], 'wa').map(label), ['#null', 0, 1])
+})
+
+test('groupEntries keeps a worktree heading with its first group and gives mid-group rows a group of their own', () => {
+  const label = (e) => e.worktreeHeading !== undefined ? `wt:${e.worktreeHeading}` : e.heading === undefined ? e.index : `#${e.heading}`
+  const entries = listEntries(['r (2026-01-01)', 'a (2026-01-01, worktree: wa, tags: t)', 'b (2026-01-01, worktree: wa)'], ['t'], null)
+  assert.deepEqual(groupEntries(entries).map((g) => g.map(label)), [['wt:null', '#null', 0], ['wt:wa', '#t', 1], ['#null', 2]])
+  const tagged = listEntries(['a (2026-01-01, tags: t)', 'b (2026-01-01, tags: t)', 'c (2026-01-01)'], ['t'])
+  assert.deepEqual(groupEntries(tagged.slice(2)).map((g) => g.map(label)), [[1], ['#null', 2]], 'rows the window starts on mid-group')
+  assert.deepEqual(groupEntries([]), [])
+})
+
+test('groupEntries drops a heading the window cut off from its rows', () => {
+  const label = (e) => e.worktreeHeading !== undefined ? `wt:${e.worktreeHeading}` : e.heading === undefined ? e.index : `#${e.heading}`
+  const tagged = listEntries(['a (2026-01-01, tags: t)', 'b (2026-01-01)'], ['t'])
+  assert.deepEqual(groupEntries(tagged.slice(0, 3)).map((g) => g.map(label)), [['#t', 0]], 'a trailing tag heading')
+  const trees = listEntries(['r (2026-01-01)', 'a (2026-01-01, worktree: wa)'], [], null)
+  assert.deepEqual(groupEntries(trees.slice(0, 5)).map((g) => g.map(label)), [['wt:null', '#null', 0]], 'a trailing worktree and tag heading')
 })
