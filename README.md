@@ -40,7 +40,7 @@ plugins/<name>/                   what an install copies: manifest, README, LICE
 plugins/<name>/tests/run.sh       unit suite, no API calls; run by tests/unit.sh and CI
 plugins/<name>/tests/e2e.sh       behavioral scenarios that call the Claude API; manual (where present)
 plugins/<name>/docs/              reference docs for that plugin (where present)
-plugins/<name>/evals/             benchmark harness for that plugin (where present)
+plugins/<name>/evals/             the plugin's `claude plugin eval` suite (where present)
 tests/                            repository-wide checks
 mise.toml, mise.lock, .mise/tasks dev tools and tasks (see Development)
 ```
@@ -60,6 +60,7 @@ mise run setup    # installs the pinned tools (mise.lock) and a git pre-commit h
 | `mise run validate` | `tests/validate.sh`: structural tests over the marketplace and every plugin: manifests, names, frontmatter, hooks, README, licenses, `claude plugin validate --strict`. |
 | `mise run test` | `tests/unit.sh`: runs every `plugins/<name>/tests/run.sh`. |
 | `mise run test:e2e <plugin> [scenario…]` | Headless behavioral scenarios for one plugin (where present). Calls the Claude API; not run in CI. |
+| `mise run eval:skim [case]` | skim's eval suite, with and without the plugin. Calls the Claude API; not run in CI. |
 | `mise run bump <plugin> <patch\|minor\|major>` | Raises the plugin's `version`. |
 | `mise run release <plugin>` | Tags the plugin's current version on `main` (see Releasing). |
 

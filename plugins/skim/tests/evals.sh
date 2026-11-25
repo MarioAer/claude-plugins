@@ -54,6 +54,15 @@ graders_typed() {
     sed -n 2,12p "$g" | grep -q '^type: ' || return 1
   done
 }
+graders_shared() {
+  local f first=""
+  for f in "$EVALS"/*/graders/"$1"; do
+    [ -e "$f" ] || continue
+    [ -n "$first" ] || first="$f"
+    cmp -s "$f" "$first" || return 1
+  done
+  [ -n "$first" ]
+}
 has_grader() { compgen -G "$1/graders/$2" >/dev/null; }
 has_correctness_grader() {
   local g
@@ -63,6 +72,7 @@ has_correctness_grader() {
   done
   return 1
 }
+docs_clean() { ! grep -q 'measure\.py\|scenarios\.md\|gen-corpus\.sh \[' "$ROOT/../../README.md" "$EVALS/README.md"; }
 prompt_neutral() { ! prompt_body "$1" | grep -Eiq 'strateg|file size|delegat|subagent|context|token|outline|large file'; }
 
 echo "eval suite offline checks"
@@ -82,7 +92,7 @@ if [ "$SCAFFOLD_STATUS" -ne 0 ]; then
 fi
 ok "scaffold generated the corpus" test -f "$WORK/src/gateway/retry_policy.ts"
 
-# Answer-key anchors (scenarios.md)
+# Answer-key anchors (the correctness graders)
 ok "retry_policy.ts:691 is DEFAULT_RETRY_BUDGET.ratio" line_is src/gateway/retry_policy.ts 691 "  ratio: 0.18,"
 ok "retry_policy.ts:697 is the never-incremented counter" line_has src/gateway/retry_policy.ts 697 'private consumed = 0;'
 ok "production.yaml:155 is the 0.05 per-route decoy" line_has config/production.yaml 155 'ratio: 0.05'
@@ -93,7 +103,7 @@ ok "store.ts:377 is expireLease" line_has src/session/store.ts 377 'function exp
 ok "store.ts:600 is unlinkDigest" line_has src/session/store.ts 600 'function unlinkDigest('
 ok "store.ts:711 is emitShard" line_has src/session/store.ts 711 'function emitShard('
 
-# File sizes the scenarios quote
+# File sizes the graders quote
 ok "retry_policy.ts is 1483 lines" lines_in src/gateway/retry_policy.ts 1483
 ok "store.ts is 800 lines" lines_in src/session/store.ts 800
 ok "circuit_breaker.ts is 701 lines" lines_in src/gateway/circuit_breaker.ts 701
@@ -114,7 +124,7 @@ for case_dir in "$EVALS"/retrieval "$EVALS"/comprehension "$EVALS"/dense-file "$
   ok "$name: prompt.md and case.yaml carry the case name" names_match "$case_dir" "$name"
   ok "$name: case.yaml uses fixture.sh as scaffold" file_has_line "$case_dir/case.yaml" "  scaffold_script: fixture.sh"
   ok "$name: fixture.sh is the shared executable scaffold" fixture_shared "$case_dir"
-  ok "$name: 5 runs on sonnet" file_has_line "$case_dir/prompt.md" "runs: 5"
+  ok "$name: five runs per arm" file_has_line "$case_dir/prompt.md" "runs: 5"
   ok "$name: model is sonnet" file_has_line "$case_dir/prompt.md" "model: sonnet"
   ok "$name: every grader declares a type" graders_typed "$case_dir"
   ok "$name: has a correctness grader" has_correctness_grader "$case_dir"
@@ -122,6 +132,16 @@ for case_dir in "$EVALS"/retrieval "$EVALS"/comprehension "$EVALS"/dense-file "$
   ok "$name: has a skill-fired grader" has_grader "$case_dir" 'skill-fired.md'
   ok "$name: prompt names none of the behaviours under test" prompt_neutral "$case_dir"
 done
+
+# Graders that share a name across cases must stay identical
+for shared in skill-fired.md no-bulk-retry-policy.md no-bulk-store.md; do
+  ok "$shared is identical in every case that has it" graders_shared "$shared"
+done
+
+# The hand-run harness is gone and the docs describe the suite
+ok "scenarios.md and measure.py are removed" test ! -e "$EVALS/scenarios.md" -a ! -e "$EVALS/measure.py"
+ok "READMEs do not point at removed files" docs_clean
+ok "evals README documents mise run eval:skim" grep -Fq 'mise run eval:skim' "$EVALS/README.md"
 
 echo
 echo "passed: $PASS   failed: $FAIL"

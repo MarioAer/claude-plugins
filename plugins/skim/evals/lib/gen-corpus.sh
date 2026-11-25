@@ -10,7 +10,7 @@
 #                                        answer is a property of 5 of them
 #   production.yaml   306 lines           holds a decoy value for scenario 1
 #
-# Usage: bash plugins/skim/evals/gen-corpus.sh [output-dir]   (default: evals/corpus next to this script)
+# Usage: bash plugins/skim/evals/lib/gen-corpus.sh [output-dir]   (default: evals/lib/corpus)
 set -euo pipefail
 
 OUT="${1:-$(dirname "$0")/corpus}"

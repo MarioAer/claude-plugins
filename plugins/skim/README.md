@@ -88,7 +88,8 @@ bash plugins/skim/tests/run.sh       # guard and reporter fixtures, no Claude pr
 claude plugin validate plugins/skim --strict
 ```
 
-The benchmark harness is in [`evals/`](evals/README.md). Verified hook
+The benchmark is a `claude plugin eval` suite in [`evals/`](evals/README.md);
+run it with `mise run eval:skim` from the repository root. Verified hook
 behaviour, including several published claims that did not survive testing, is
 in [`docs/mechanisms.md`](docs/mechanisms.md).
 

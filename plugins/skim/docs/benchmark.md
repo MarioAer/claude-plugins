@@ -1,6 +1,6 @@
 # Benchmark: reading-large-files
 
-Measured 2026-09-29. Reproduce with [`../evals/README.md`](../evals/README.md).
+Measured by hand on 2026-09-29, before the eval suite existed; the method is in this file's history. Current method: [`../evals/README.md`](../evals/README.md).
 
 Method: subagents on Claude Sonnet, five repetitions per arm, against the
 generated corpus. Behaviour was extracted from transcripts with
