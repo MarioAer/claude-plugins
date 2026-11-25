@@ -243,11 +243,11 @@ fi
 
 echo "$passed passed, $failed failed"
 
-# The mod's tests need Node 22 or later (node:test); the shell checks above do not.
+# The mod's tests run under Bun (its node:test support); the shell checks above do not need it.
 echo
-if command -v node >/dev/null 2>&1; then
-  node --test "$ROOT/tests/mod/*.test.mjs" || failed=$((failed + 1))
+if command -v bun >/dev/null 2>&1; then
+  bun test "$ROOT/tests/mod/" || failed=$((failed + 1))
 else
-  echo "SKIP mod tests: node not on PATH"
+  echo "SKIP mod tests: bun not on PATH"
 fi
 [ "$failed" -eq 0 ]

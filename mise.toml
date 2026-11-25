@@ -4,7 +4,7 @@ lockfile = true
 
 # On PATH inside the repo. claude and gh are pinned per task instead, so they never shadow your own.
 [tools]
-node = "26"
+bun = "1"
 # The oldest python3 the hooks support (macOS ships 3.9), so tests catch newer-only syntax.
 python = "3.9"
 jq = "1"
