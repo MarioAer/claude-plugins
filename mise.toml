@@ -55,3 +55,9 @@ arg "<plugin>" help="Plugin directory under plugins/"
 arg "[scenario]..." help="Scenario ids (default: all)" var=#true
 '''
 run = 'bash "plugins/${usage_plugin?}/tests/e2e.sh" ${usage_scenario:-}'
+
+[tasks."eval:skim"]
+description = "skim's eval suite, with and without the plugin (calls the Claude API, costs tokens)"
+tools.claude = "2.1.331"
+usage = 'arg "[case]" help="Case name glob (default: all cases)"'
+run = 'claude plugin eval plugins/skim --scaffold --trust-plugin --no-publish --threshold 0.8 --max-cost-usd 25 --allow-tools Bash ${usage_case:+--case "$usage_case"}'

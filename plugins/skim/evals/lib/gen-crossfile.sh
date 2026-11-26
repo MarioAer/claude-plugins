@@ -5,7 +5,7 @@
 # files, which is the shape with the strongest case for delegation: avoiding
 # three whole-file reads rather than one.
 #
-# Called by gen-corpus.sh. Usage: bash evals/gen-crossfile.sh <corpus-dir>
+# Called by gen-corpus.sh. Usage: bash plugins/skim/evals/lib/gen-crossfile.sh <corpus-dir>
 set -euo pipefail
 
 OUT="${1:?corpus directory required}"

@@ -1,10 +1,10 @@
 # Benchmark: reading-large-files
 
-Measured 2026-09-29. Reproduce with [`../evals/README.md`](../evals/README.md).
+Measured by hand on 2026-09-29, before the eval suite existed; the method is in this file's history. Current method: [`../evals/README.md`](../evals/README.md).
 
 Method: subagents on Claude Sonnet, five repetitions per arm, against the
 generated corpus. Behaviour was extracted from transcripts with
-`evals/measure.py` rather than self-reported, since asking an agent to report
+`evals/measure.py` (since removed) rather than self-reported, since asking an agent to report
 its reads makes reads salient and changes them.
 
 ## Results
@@ -93,7 +93,7 @@ the read-modify-write still races. The answer key said the 45 non-bypassing
 functions were correct. The repetitions were right and the key was wrong.
 
 **The skill arm was re-run.** The first attempt pointed it at `SKILL.md` inside
-this repository, which gave it a path to `evals/scenarios.md` and the
+this repository, which gave it a path to `evals/scenarios.md` (since removed) and the
 generators; all five repetitions opened the answer key. That arm was discarded
 and re-run against an isolated copy with no path back here. The clean figures
 landed within about 2% of the contaminated ones, so the conclusion did not

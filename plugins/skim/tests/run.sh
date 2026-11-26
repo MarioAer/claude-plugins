@@ -214,4 +214,8 @@ echo "passed: $PASS   failed: $FAIL"
 
 # The reporter has its own fixtures; run them here so CI needs one entry point.
 echo
-bash "$ROOT/tests/report.sh"
+bash "$ROOT/tests/report.sh" || exit 1
+
+# The eval suite's offline checks: corpus anchors and the documented command.
+echo
+bash "$ROOT/tests/evals.sh"
